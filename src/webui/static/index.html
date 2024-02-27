@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PulseKontrol</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>PulseKontrol</h1>
+            <div id="connection-status" class="disconnected">Disconnected</div>
+        </header>
+        
+        <main>
+            <section class="card">
+                <h2>MIDI Controller</h2>
+                <div id="controller-info">
+                    <p>Status: <span id="midi-status">Not detected</span></p>
+                    <p>Model: <span id="midi-model">-</span></p>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Audio Mixer</h2>
+                <div id="mixer-container">
+                    <p>Loading audio sources...</p>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Connected to: <span id="server-url">-</span></p>
+            <p>Status: <span id="status-message">Initializing...</span></p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
