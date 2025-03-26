@@ -16,6 +16,14 @@ type Stream struct {
 	paStream interface{}
 }
 
+type AudioSource struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Volume   int    `json:"volume"`
+	Muted    bool   `json:"muted"`
+}
+
 type PAClient struct {
 	log             zerolog.Logger
 	context         *pulseaudio.Client
@@ -39,6 +47,60 @@ func NewPAClient() *PAClient {
 		recordStreams:   []Stream{},
 	}
 	return client
+}
+
+// GetAudioSources returns all audio sources in a format suitable for the UI
+func (client *PAClient) GetAudioSources() []AudioSource {
+	client.refreshStreams()
+	
+	// Collect all sources
+	sources := []AudioSource{}
+	
+	// Add outputs (sinks)
+	lo.ForEach(client.outputs, func(stream Stream, i int) {
+		sources = append(sources, AudioSource{
+			ID:       stream.fullName,
+			Name:     stream.name,
+			Type:     "output",
+			Volume:   75, // Default value - will need to be updated later
+			Muted:    false,
+		})
+	})
+	
+	// Add inputs (sources)
+	lo.ForEach(client.inputs, func(stream Stream, i int) {
+		sources = append(sources, AudioSource{
+			ID:       stream.fullName,
+			Name:     stream.name,
+			Type:     "input",
+			Volume:   75, // Default value - will need to be updated later
+			Muted:    false,
+		})
+	})
+	
+	// Add playback streams (sink inputs)
+	lo.ForEach(client.playbackStreams, func(stream Stream, i int) {
+		sources = append(sources, AudioSource{
+			ID:       stream.fullName,
+			Name:     stream.name,
+			Type:     "playback",
+			Volume:   75, // Default value - will need to be updated later
+			Muted:    false,
+		})
+	})
+	
+	// Add record streams (source outputs)
+	lo.ForEach(client.recordStreams, func(stream Stream, i int) {
+		sources = append(sources, AudioSource{
+			ID:       stream.fullName,
+			Name:     stream.name,
+			Type:     "record",
+			Volume:   75, // Default value - will need to be updated later
+			Muted:    false,
+		})
+	})
+	
+	return sources
 }
 
 func (client *PAClient) List() {

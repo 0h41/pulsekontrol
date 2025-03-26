@@ -77,7 +77,7 @@ func Run() {
 	// Start web UI if enabled
 	var webServer *webui.WebUIServer
 	if !opt.Called("no-webui") {
-		webServer = webui.NewWebUIServer(*webAddr)
+		webServer = webui.NewWebUIServer(*webAddr, paClient)
 		
 		// Set up configuration update notifications to WebUI
 		configManager.Subscribe("mapping.updated", func(data interface{}) {

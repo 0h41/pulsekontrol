@@ -2,11 +2,13 @@ package webui
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"time"
 
+	"github.com/0h41/pulsekontrol/src/pulseaudio"
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
 )
@@ -20,9 +22,11 @@ type WebUIServer struct {
 	clients        map[*websocket.Conn]bool
 	broadcast      chan []byte
 	configUpdateCh chan interface{}
+	paClient       *pulseaudio.PAClient
+	stopChan       chan struct{}
 }
 
-func NewWebUIServer(addr string) *WebUIServer {
+func NewWebUIServer(addr string, paClient *pulseaudio.PAClient) *WebUIServer {
 	return &WebUIServer{
 		Addr: addr,
 		upgrader: websocket.Upgrader{
@@ -35,6 +39,8 @@ func NewWebUIServer(addr string) *WebUIServer {
 		clients:        make(map[*websocket.Conn]bool),
 		broadcast:      make(chan []byte),
 		configUpdateCh: make(chan interface{}),
+		paClient:       paClient,
+		stopChan:       make(chan struct{}),
 	}
 }
 
@@ -51,6 +57,9 @@ func (s *WebUIServer) Start() error {
 
 	// Start WebSocket broadcasting
 	go s.handleBroadcasts()
+
+	// Start audio sources monitoring
+	go s.monitorAudioSources()
 
 	// Start HTTP server
 	log.Info().Msgf("Starting web server on %s", s.Addr)
@@ -95,7 +104,104 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		// Process messages from client
 		log.Debug().Msgf("Received message: %s", string(message))
-		// TODO: Handle client commands
+		
+		// Parse the message
+		var clientMsg map[string]interface{}
+		if err := json.Unmarshal(message, &clientMsg); err != nil {
+			log.Error().Err(err).Msg("Failed to parse client message")
+			continue
+		}
+		
+		// Handle based on message type
+		msgType, ok := clientMsg["type"].(string)
+		if !ok {
+			log.Error().Msg("Message missing 'type' field")
+			continue
+		}
+		
+		switch msgType {
+		case "getState":
+			// Client is requesting initial state
+			// Currently handled by monitorAudioSources periodic updates
+			
+		case "setVolume":
+			// Client wants to change volume
+			sourceId, ok := clientMsg["sourceId"].(string)
+			if !ok {
+				log.Error().Msg("setVolume missing sourceId")
+				continue
+			}
+			
+			volumeFloat, ok := clientMsg["volume"].(float64)
+			if !ok {
+				log.Error().Msg("setVolume missing volume or not a number")
+				continue
+			}
+			
+			volume := int(volumeFloat)
+			log.Debug().Str("sourceId", sourceId).Int("volume", volume).Msg("Setting volume")
+			
+			// TODO: Implement volume change via pulseaudio client
+			
+		case "assignControl":
+			// Client wants to assign a source to a control
+			controlId, ok := clientMsg["controlId"].(string)
+			if !ok {
+				log.Error().Msg("assignControl missing controlId")
+				continue
+			}
+			
+			controlType, ok := clientMsg["controlType"].(string)
+			if !ok {
+				log.Error().Msg("assignControl missing controlType")
+				continue
+			}
+			
+			sourceId, ok := clientMsg["sourceId"].(string)
+			if !ok {
+				log.Error().Msg("assignControl missing sourceId")
+				continue
+			}
+			
+			log.Debug().
+				Str("controlId", controlId).
+				Str("controlType", controlType).
+				Str("sourceId", sourceId).
+				Msg("Assigning source to control")
+			
+			// TODO: Update configuration to add this assignment
+			
+		case "unassignControl":
+			// Client wants to remove a source from a control
+			controlId, ok := clientMsg["controlId"].(string)
+			if !ok {
+				log.Error().Msg("unassignControl missing controlId")
+				continue
+			}
+			
+			controlType, ok := clientMsg["controlType"].(string)
+			if !ok {
+				log.Error().Msg("unassignControl missing controlType")
+				continue
+			}
+			
+			sourceId, ok := clientMsg["sourceId"].(string)
+			if !ok {
+				log.Error().Msg("unassignControl missing sourceId")
+				continue
+			}
+			
+			log.Debug().
+				Str("controlId", controlId).
+				Str("controlType", controlType).
+				Str("sourceId", sourceId).
+				Msg("Removing source from control")
+			
+			// TODO: Update configuration to remove this assignment
+			
+		default:
+			log.Debug().Str("type", msgType).Msg("Unknown message type")
+		}
 	}
 }
 
@@ -116,6 +222,40 @@ func (s *WebUIServer) handleBroadcasts() {
 			// Handle config updates
 			log.Debug().Interface("update", update).Msg("Config updated, notifying clients")
 			// TODO: Convert update to JSON and broadcast it
+		case <-s.stopChan:
+			return
+		}
+	}
+}
+
+// monitorAudioSources periodically fetches audio sources and broadcasts them to clients
+func (s *WebUIServer) monitorAudioSources() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Get audio sources
+			sources := s.paClient.GetAudioSources()
+			
+			// Create message
+			message := map[string]interface{}{
+				"type":    "audioSourcesUpdate",
+				"sources": sources,
+			}
+			
+			// Convert to JSON
+			jsonData, err := json.Marshal(message)
+			if err != nil {
+				log.Error().Err(err).Msg("Failed to marshal audio sources")
+				continue
+			}
+			
+			// Broadcast to clients
+			s.broadcast <- jsonData
+		case <-s.stopChan:
+			return
 		}
 	}
 }

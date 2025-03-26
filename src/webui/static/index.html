@@ -10,22 +10,34 @@
     <div class="container">
         <header>
             <h1>PulseKontrol</h1>
-            <div id="connection-status" class="disconnected">Disconnected</div>
+            <div class="header-status">
+                <div id="connection-status" class="disconnected">Disconnected</div>
+                <div class="midi-info">
+                    <span>MIDI: <span id="midi-status">Not detected</span></span>
+                    <span>Model: <span id="midi-model">-</span></span>
+                </div>
+            </div>
         </header>
         
         <main>
             <section class="card">
-                <h2>MIDI Controller</h2>
-                <div id="controller-info">
-                    <p>Status: <span id="midi-status">Not detected</span></p>
-                    <p>Model: <span id="midi-model">-</span></p>
+                <h2>Sliders</h2>
+                <div id="sliders-container" class="control-container">
+                    <!-- Sliders will be added here -->
                 </div>
             </section>
 
             <section class="card">
-                <h2>Audio Mixer</h2>
-                <div id="mixer-container">
-                    <p>Loading audio sources...</p>
+                <h2>Knobs</h2>
+                <div id="knobs-container" class="control-container">
+                    <!-- Knobs will be added here -->
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Audio Sources</h2>
+                <div id="sources-container" class="control-container">
+                    <!-- Unassigned sources will be added here -->
                 </div>
             </section>
         </main>
