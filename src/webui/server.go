@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/0h41/pulsekontrol/src/configuration"
@@ -172,10 +173,11 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				Str("sourceId", sourceId).
 				Msg("Assigning source to control")
 			
-			// Find the audio source in the available sources
+			// Check if this is a real source or a virtual source
 			sources := s.paClient.GetAudioSources()
 			var sourceToAssign *pulseaudio.AudioSource
 			
+			// First check if it's a real available source
 			for _, source := range sources {
 				if source.ID == sourceId {
 					sourceToAssign = &source
@@ -183,19 +185,41 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			
-			if sourceToAssign == nil {
-				log.Error().Str("sourceId", sourceId).Msg("Source not found")
-				continue
+			// If it's a real source, use it
+			if sourceToAssign != nil {
+				// Create configuration source
+				configSource := configuration.Source{
+					Type: configuration.PulseAudioTargetType(sourceToAssign.Type),
+					Name: sourceToAssign.Name,
+				}
+				
+				// Update configuration
+				s.configManager.AssignSource(controlType, controlId, configSource)
+			} else {
+				// It might be a virtual ID for an inactive source
+				parts := strings.SplitN(sourceId, ":", 2)
+				if len(parts) == 2 {
+					sourceType := parts[0]
+					sourceName := parts[1]
+					
+					log.Debug().
+						Str("sourceType", sourceType).
+						Str("sourceName", sourceName).
+						Msg("Assigning inactive source")
+					
+					// Create configuration source
+					configSource := configuration.Source{
+						Type: configuration.PulseAudioTargetType(sourceType),
+						Name: sourceName,
+					}
+					
+					// Update configuration
+					s.configManager.AssignSource(controlType, controlId, configSource)
+				} else {
+					log.Error().Str("sourceId", sourceId).Msg("Invalid source ID format")
+					continue
+				}
 			}
-			
-			// Create configuration source
-			configSource := configuration.Source{
-				Type: configuration.PulseAudioTargetType(sourceToAssign.Type),
-				Name: sourceToAssign.Name,
-			}
-			
-			// Update configuration
-			s.configManager.AssignSource(controlType, controlId, configSource)
 			
 		case "unassignControl":
 			// Client wants to remove a source from a control
@@ -234,18 +258,38 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			
-			if sourceToRemove == nil {
-				log.Error().Str("sourceId", sourceId).Msg("Source not found")
-				continue
+			if sourceToRemove != nil {
+				// Source is active, unassign normally
+				s.configManager.UnassignSource(
+					controlType,
+					controlId,
+					configuration.PulseAudioTargetType(sourceToRemove.Type),
+					sourceToRemove.Name,
+				)
+			} else {
+				// Source might be a virtual ID for an inactive source
+				// Parse the ID which should be in the format "type:name"
+				parts := strings.SplitN(sourceId, ":", 2)
+				if len(parts) == 2 {
+					sourceType := parts[0]
+					sourceName := parts[1]
+					
+					log.Debug().
+						Str("sourceType", sourceType).
+						Str("sourceName", sourceName).
+						Msg("Unassigning inactive source")
+					
+					s.configManager.UnassignSource(
+						controlType,
+						controlId,
+						configuration.PulseAudioTargetType(sourceType),
+						sourceName,
+					)
+				} else {
+					log.Error().Str("sourceId", sourceId).Msg("Invalid virtual source ID format")
+					continue
+				}
 			}
-			
-			// Remove from configuration
-			s.configManager.UnassignSource(
-				controlType,
-				controlId,
-				configuration.PulseAudioTargetType(sourceToRemove.Type),
-				sourceToRemove.Name,
-			)
 			
 		default:
 			log.Debug().Str("type", msgType).Msg("Unknown message type")
