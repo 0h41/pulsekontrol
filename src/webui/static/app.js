@@ -107,27 +107,27 @@ function updateMidiDeviceInfo(device) {
 // Application state
 const appState = {
     audioSources: [],
-    sliderAssignments: {}, // Control ID -> Source ID
-    knobAssignments: {},   // Control ID -> Source ID
+    sliderAssignments: {}, // Control ID -> Array of Source IDs
+    knobAssignments: {},   // Control ID -> Array of Source IDs
     sliderControls: [
-        { id: "slider1", name: "Slider 1" },
-        { id: "slider2", name: "Slider 2" },
-        { id: "slider3", name: "Slider 3" },
-        { id: "slider4", name: "Slider 4" },
-        { id: "slider5", name: "Slider 5" },
-        { id: "slider6", name: "Slider 6" },
-        { id: "slider7", name: "Slider 7" },
-        { id: "slider8", name: "Slider 8" },
+        { id: "slider1", name: "Slider 1", value: 50 },
+        { id: "slider2", name: "Slider 2", value: 50 },
+        { id: "slider3", name: "Slider 3", value: 50 },
+        { id: "slider4", name: "Slider 4", value: 50 },
+        { id: "slider5", name: "Slider 5", value: 50 },
+        { id: "slider6", name: "Slider 6", value: 50 },
+        { id: "slider7", name: "Slider 7", value: 50 },
+        { id: "slider8", name: "Slider 8", value: 50 },
     ],
     knobControls: [
-        { id: "knob1", name: "Knob 1" },
-        { id: "knob2", name: "Knob 2" },
-        { id: "knob3", name: "Knob 3" },
-        { id: "knob4", name: "Knob 4" },
-        { id: "knob5", name: "Knob 5" },
-        { id: "knob6", name: "Knob 6" },
-        { id: "knob7", name: "Knob 7" },
-        { id: "knob8", name: "Knob 8" },
+        { id: "knob1", name: "Knob 1", value: 50 },
+        { id: "knob2", name: "Knob 2", value: 50 },
+        { id: "knob3", name: "Knob 3", value: 50 },
+        { id: "knob4", name: "Knob 4", value: 50 },
+        { id: "knob5", name: "Knob 5", value: 50 },
+        { id: "knob6", name: "Knob 6", value: 50 },
+        { id: "knob7", name: "Knob 7", value: 50 },
+        { id: "knob8", name: "Knob 8", value: 50 },
     ]
 };
 
@@ -148,9 +148,10 @@ function updateAudioSources(sources) {
     
     // Render slider controls with assignments
     appState.sliderControls.forEach(control => {
-        const assignedSourceId = appState.sliderAssignments[control.id];
-        const assignedSource = assignedSourceId ? 
-            appState.audioSources.find(s => s.id === assignedSourceId) : null;
+        const assignedSourceIds = appState.sliderAssignments[control.id] || [];
+        const assignedSources = assignedSourceIds.map(id => 
+            appState.audioSources.find(s => s.id === id)
+        ).filter(s => s); // Filter out any undefined values
             
         const controlDiv = document.createElement('div');
         controlDiv.className = 'mixer-channel slider-control';
@@ -158,9 +159,9 @@ function updateAudioSources(sources) {
         controlDiv.setAttribute('data-control-type', 'slider');
         controlDiv.setAttribute('draggable', 'false');
         
-        if (assignedSource) {
-            // Show assigned source
-            renderAssignedSource(controlDiv, control, assignedSource);
+        if (assignedSources.length > 0) {
+            // Show assigned sources
+            renderControlWithSources(controlDiv, control, assignedSources);
         } else {
             // Show empty control
             renderEmptyControl(controlDiv, control);
@@ -171,9 +172,10 @@ function updateAudioSources(sources) {
     
     // Render knob controls with assignments
     appState.knobControls.forEach(control => {
-        const assignedSourceId = appState.knobAssignments[control.id];
-        const assignedSource = assignedSourceId ? 
-            appState.audioSources.find(s => s.id === assignedSourceId) : null;
+        const assignedSourceIds = appState.knobAssignments[control.id] || [];
+        const assignedSources = assignedSourceIds.map(id => 
+            appState.audioSources.find(s => s.id === id)
+        ).filter(s => s); // Filter out any undefined values
             
         const controlDiv = document.createElement('div');
         controlDiv.className = 'mixer-channel knob-control';
@@ -181,9 +183,9 @@ function updateAudioSources(sources) {
         controlDiv.setAttribute('data-control-type', 'knob');
         controlDiv.setAttribute('draggable', 'false');
         
-        if (assignedSource) {
-            // Show assigned source
-            renderAssignedSource(controlDiv, control, assignedSource);
+        if (assignedSources.length > 0) {
+            // Show assigned sources
+            renderControlWithSources(controlDiv, control, assignedSources);
         } else {
             // Show empty control
             renderEmptyControl(controlDiv, control);
@@ -192,23 +194,24 @@ function updateAudioSources(sources) {
         knobsContainer.appendChild(controlDiv);
     });
     
-    // Find unassigned sources
-    const assignedSourceIds = [
-        ...Object.values(appState.sliderAssignments),
-        ...Object.values(appState.knobAssignments)
+    // Get all assigned source IDs (flattened from arrays)
+    const allAssignedIds = [
+        ...Object.values(appState.sliderAssignments).flat(),
+        ...Object.values(appState.knobAssignments).flat()
     ];
     
+    // Only unassigned sources go in the right column
     const unassignedSources = appState.audioSources.filter(
-        source => !assignedSourceIds.includes(source.id)
+        source => !allAssignedIds.includes(source.id)
     );
     
-    // Render unassigned sources
+    // Render unassigned audio sources
     if (unassignedSources.length === 0) {
-        sourcesContainer.innerHTML = '<div class="control-placeholder">All sources are assigned</div>';
+        sourcesContainer.innerHTML = '<div class="control-placeholder">No unassigned sources available</div>';
     } else {
         unassignedSources.forEach(source => {
             const sourceDiv = document.createElement('div');
-            sourceDiv.className = 'mixer-channel unassigned';
+            sourceDiv.className = 'mixer-channel source';
             sourceDiv.id = `source-${source.id}`;
             sourceDiv.setAttribute('data-source-id', source.id);
             sourceDiv.setAttribute('draggable', 'true');
@@ -225,26 +228,6 @@ function updateAudioSources(sources) {
             label.title = source.name; // For tooltip on hover
             sourceDiv.appendChild(label);
             
-            // Add slider for volume control
-            const slider = document.createElement('input');
-            slider.type = 'range';
-            slider.min = 0;
-            slider.max = 100;
-            slider.value = source.volume || 0;
-            slider.setAttribute('data-id', source.id);
-            
-            // Add event listener for volume change
-            slider.addEventListener('input', (e) => {
-                const value = parseInt(e.target.value);
-                sendMessage({
-                    type: 'setVolume',
-                    sourceId: source.id,
-                    volume: value
-                });
-            });
-            
-            sourceDiv.appendChild(slider);
-            
             // Add drag event handlers
             sourceDiv.addEventListener('dragstart', handleDragStart);
             sourceDiv.addEventListener('dragend', handleDragEnd);
@@ -257,61 +240,112 @@ function updateAudioSources(sources) {
     setupDropZones();
 }
 
-function renderAssignedSource(controlDiv, control, source) {
+function renderControlWithSources(controlDiv, control, sources) {
+    // Add control visualization based on type
+    if (controlDiv.getAttribute('data-control-type') === 'slider') {
+        renderSliderVisualization(controlDiv, control);
+    } else {
+        renderKnobVisualization(controlDiv, control);
+    }
+    
     // Add control name
-    const controlName = document.createElement('small');
-    controlName.textContent = `${control.name}: ${source.name}`;
+    const controlName = document.createElement('div');
+    controlName.textContent = control.name;
     controlName.className = 'control-name';
     controlDiv.appendChild(controlName);
     
-    // Add type badge
-    const typeBadge = document.createElement('span');
-    typeBadge.className = 'type-badge';
-    typeBadge.textContent = source.type;
-    controlDiv.appendChild(typeBadge);
+    // Add sources list - also a drop zone
+    const sourcesList = document.createElement('div');
+    sourcesList.className = 'sources-list';
+    sourcesList.setAttribute('data-parent-control', control.id);
+    sourcesList.setAttribute('data-parent-type', controlDiv.getAttribute('data-control-type'));
     
-    // Add label
-    const label = document.createElement('label');
-    label.textContent = source.name;
-    label.title = source.name; // For tooltip on hover
-    controlDiv.appendChild(label);
+    // Make the sources list a drop target too
+    sourcesList.addEventListener('dragover', handleDragOver);
+    sourcesList.addEventListener('dragenter', handleDragEnter);
+    sourcesList.addEventListener('dragleave', handleDragLeave);
+    sourcesList.addEventListener('drop', handleDrop);
     
-    // Add slider for volume control
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.min = 0;
-    slider.max = 100;
-    slider.value = source.volume || 0;
-    slider.setAttribute('data-id', source.id);
-    
-    // Add event listener for volume change
-    slider.addEventListener('input', (e) => {
-        const value = parseInt(e.target.value);
-        sendMessage({
-            type: 'setVolume',
-            sourceId: source.id,
-            volume: value
-        });
+    sources.forEach(source => {
+        const sourceItem = document.createElement('div');
+        sourceItem.className = 'source-item';
+        sourceItem.setAttribute('draggable', 'true');
+        sourceItem.setAttribute('data-source-id', source.id);
+        sourceItem.setAttribute('data-parent-control', control.id);
+        sourceItem.setAttribute('data-parent-type', controlDiv.getAttribute('data-control-type'));
+        
+        // Add drag event handlers
+        sourceItem.addEventListener('dragstart', handleDragStart);
+        sourceItem.addEventListener('dragend', handleDragEnd);
+        
+        // Add type badge
+        const typeBadge = document.createElement('span');
+        typeBadge.className = 'type-badge';
+        typeBadge.textContent = source.type;
+        sourceItem.appendChild(typeBadge);
+        
+        // Add source name
+        const sourceName = document.createElement('span');
+        sourceName.textContent = source.name;
+        sourceName.title = source.name; // For tooltip on hover
+        sourceItem.appendChild(sourceName);
+        
+        sourcesList.appendChild(sourceItem);
     });
     
-    controlDiv.appendChild(slider);
+    controlDiv.appendChild(sourcesList);
+}
+
+function renderSliderVisualization(controlDiv, control) {
+    const controlVisual = document.createElement('div');
+    controlVisual.className = 'control-visual';
     
-    // Add remove button
-    const removeBtn = document.createElement('button');
-    removeBtn.textContent = 'Remove';
-    removeBtn.className = 'remove-btn';
-    removeBtn.addEventListener('click', () => unassignSource(control.id, source.id));
-    controlDiv.appendChild(removeBtn);
+    // Create progress track
+    const progressTrack = document.createElement('div');
+    progressTrack.className = 'progress-track';
     
-    // Store source ID in data attribute
-    controlDiv.setAttribute('data-source-id', source.id);
+    // Create progress fill
+    const progressFill = document.createElement('div');
+    progressFill.className = 'progress-fill';
+    progressFill.style.width = `${control.value}%`;
+    
+    // Create value label
+    const valueLabel = document.createElement('span');
+    valueLabel.className = 'value-label';
+    valueLabel.textContent = control.value;
+    
+    // Assemble components
+    progressTrack.appendChild(progressFill);
+    controlVisual.appendChild(progressTrack);
+    controlVisual.appendChild(valueLabel);
+    
+    controlDiv.appendChild(controlVisual);
+}
+
+// Use the same visualization for knobs
+function renderKnobVisualization(controlDiv, control) {
+    // Use same horizontal slider for both controls
+    renderSliderVisualization(controlDiv, control);
 }
 
 function renderEmptyControl(controlDiv, control) {
+    // Add control visualization based on type
+    if (controlDiv.getAttribute('data-control-type') === 'slider') {
+        renderSliderVisualization(controlDiv, control);
+    } else {
+        renderKnobVisualization(controlDiv, control);
+    }
+    
+    // Add control name
+    const controlName = document.createElement('div');
+    controlName.textContent = control.name;
+    controlName.className = 'control-name';
+    controlDiv.appendChild(controlName);
+    
     // Create content for empty control
     const placeholder = document.createElement('div');
     placeholder.className = 'control-placeholder';
-    placeholder.textContent = `Drop audio source here for ${control.name}`;
+    placeholder.textContent = `Drop audio source here`;
     controlDiv.appendChild(placeholder);
 }
 
@@ -322,7 +356,18 @@ function handleDragStart(e) {
     this.classList.add('dragging');
     draggedItem = this;
     e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', this.getAttribute('data-source-id'));
+    
+    // Store source ID and parent info (if from a control)
+    e.dataTransfer.setData('source-id', this.getAttribute('data-source-id'));
+    
+    // If dragging from a control, store the parent info
+    const parentControl = this.getAttribute('data-parent-control');
+    const parentType = this.getAttribute('data-parent-type');
+    
+    if (parentControl && parentType) {
+        e.dataTransfer.setData('parent-control', parentControl);
+        e.dataTransfer.setData('parent-type', parentType);
+    }
 }
 
 function handleDragEnd(e) {
@@ -352,6 +397,12 @@ function setupDropZones() {
         control.addEventListener('dragleave', handleDragLeave);
         control.addEventListener('drop', handleDrop);
     });
+    
+    // Make sources container a drop zone for unassigning
+    sourcesContainer.addEventListener('dragover', handleDragOver);
+    sourcesContainer.addEventListener('dragenter', handleDragEnter);
+    sourcesContainer.addEventListener('dragleave', handleDragLeave);
+    sourcesContainer.addEventListener('drop', handleSourcesDrop);
 }
 
 function handleDragOver(e) {
@@ -375,35 +426,67 @@ function handleDrop(e) {
     
     if (!draggedItem) return;
     
-    const sourceId = e.dataTransfer.getData('text/plain');
+    const sourceId = e.dataTransfer.getData('source-id');
     const controlId = this.id;
     const controlType = this.getAttribute('data-control-type');
     
-    // Assign source to control
+    // Check if we're coming from another control
+    const oldParentControl = e.dataTransfer.getData('parent-control');
+    const oldParentType = e.dataTransfer.getData('parent-type');
+    
+    if (oldParentControl && oldParentType) {
+        // Remove from old control first
+        unassignSource(oldParentControl, sourceId, oldParentType);
+    }
+    
+    // Assign source to the new control
     assignSource(controlId, sourceId, controlType);
     
     return false;
 }
 
+function handleSourcesDrop(e) {
+    e.preventDefault();
+    
+    // Remove drop target highlighting
+    this.classList.remove('drop-target');
+    
+    if (!draggedItem) return;
+    
+    const sourceId = e.dataTransfer.getData('source-id');
+    
+    // Check if we're coming from a control
+    const oldParentControl = e.dataTransfer.getData('parent-control');
+    const oldParentType = e.dataTransfer.getData('parent-type');
+    
+    if (oldParentControl && oldParentType) {
+        // Unassign from the control
+        unassignSource(oldParentControl, sourceId, oldParentType);
+    }
+    
+    return false;
+}
+
 function assignSource(controlId, sourceId, controlType) {
-    // Check if source is already assigned elsewhere and remove it
-    for (const sliderId in appState.sliderAssignments) {
-        if (appState.sliderAssignments[sliderId] === sourceId) {
-            delete appState.sliderAssignments[sliderId];
-        }
-    }
-    
-    for (const knobId in appState.knobAssignments) {
-        if (appState.knobAssignments[knobId] === sourceId) {
-            delete appState.knobAssignments[knobId];
-        }
-    }
-    
-    // Assign to the new control
+    // Initialize the array if it doesn't exist
     if (controlType === 'slider') {
-        appState.sliderAssignments[controlId] = sourceId;
+        if (!appState.sliderAssignments[controlId]) {
+            appState.sliderAssignments[controlId] = [];
+        }
+        
+        // Only add if not already assigned to this control
+        if (!appState.sliderAssignments[controlId].includes(sourceId)) {
+            appState.sliderAssignments[controlId].push(sourceId);
+        }
     } else if (controlType === 'knob') {
-        appState.knobAssignments[controlId] = sourceId;
+        if (!appState.knobAssignments[controlId]) {
+            appState.knobAssignments[controlId] = [];
+        }
+        
+        // Only add if not already assigned to this control
+        if (!appState.knobAssignments[controlId].includes(sourceId)) {
+            appState.knobAssignments[controlId].push(sourceId);
+        }
     }
     
     // Send assignment to server
@@ -418,27 +501,37 @@ function assignSource(controlId, sourceId, controlType) {
     updateAudioSources(appState.audioSources);
 }
 
-function unassignSource(controlId, sourceId) {
-    // Find the assignment type
-    let controlType = null;
-    
-    if (controlId in appState.sliderAssignments) {
-        delete appState.sliderAssignments[controlId];
-        controlType = 'slider';
-    } else if (controlId in appState.knobAssignments) {
-        delete appState.knobAssignments[controlId];
-        controlType = 'knob';
+function unassignSource(controlId, sourceId, controlType) {
+    // Remove the source ID from the appropriate assignment array
+    if (controlType === 'slider') {
+        if (appState.sliderAssignments[controlId]) {
+            appState.sliderAssignments[controlId] = appState.sliderAssignments[controlId]
+                .filter(id => id !== sourceId);
+            
+            // Clean up empty arrays
+            if (appState.sliderAssignments[controlId].length === 0) {
+                delete appState.sliderAssignments[controlId];
+            }
+        }
+    } else if (controlType === 'knob') {
+        if (appState.knobAssignments[controlId]) {
+            appState.knobAssignments[controlId] = appState.knobAssignments[controlId]
+                .filter(id => id !== sourceId);
+            
+            // Clean up empty arrays
+            if (appState.knobAssignments[controlId].length === 0) {
+                delete appState.knobAssignments[controlId];
+            }
+        }
     }
     
     // Send unassignment to server
-    if (controlType) {
-        sendMessage({
-            type: 'unassignControl',
-            controlId: controlId,
-            controlType: controlType,
-            sourceId: sourceId
-        });
-    }
+    sendMessage({
+        type: 'unassignControl',
+        controlId: controlId,
+        controlType: controlType,
+        sourceId: sourceId
+    });
     
     // Update UI to reflect new assignments
     updateAudioSources(appState.audioSources);
