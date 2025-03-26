@@ -14,7 +14,6 @@ import (
 	"github.com/0h41/pulsekontrol/src/webui"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"github.com/samber/lo"
 )
 
 var (
@@ -77,7 +76,7 @@ func Run() {
 	// Start web UI if enabled
 	var webServer *webui.WebUIServer
 	if !opt.Called("no-webui") {
-		webServer = webui.NewWebUIServer(*webAddr, paClient)
+		webServer = webui.NewWebUIServer(*webAddr, paClient, configManager)
 		
 		// Set up configuration update notifications to WebUI
 		configManager.Subscribe("mapping.updated", func(data interface{}) {
@@ -95,16 +94,119 @@ func Run() {
 		log.Info().Msgf("Web interface available at http://%s", *webAddr)
 	}
 
-	// Create MIDI clients
-	midiClients := make([]*midi.MidiClient, 0, len(config.MidiDevices))
-	for _, midiDevice := range config.MidiDevices {
-		deviceRules := lo.Filter(config.Rules, func(rule configuration.Rule, i int) bool {
-			return rule.MidiMessage.DeviceName == midiDevice.Name
-		})
-		midiClient := midi.NewMidiClient(paClient, midiDevice, deviceRules)
-		midiClients = append(midiClients, midiClient)
-		go midiClient.Run()
+	// Convert new config format to legacy format for MIDI client
+	// This is temporary compatibility code until the MIDI client is updated
+	midiDevice := configuration.MidiDevice{
+		Name:        config.Device.Name,
+		Type:        configuration.KorgNanoKontrol2,
+		MidiInName:  config.Device.InPort,
+		MidiOutName: config.Device.OutPort,
 	}
+	
+	// Create rules from control assignments
+	var rules []configuration.Rule
+	
+	// Add slider rules
+	for _, slider := range config.Controls.Sliders {
+		if len(slider.Sources) > 0 {
+			rule := configuration.Rule{
+				MidiMessage: configuration.MidiMessage{
+					DeviceName:        midiDevice.Name,
+					DeviceControlPath: slider.Path,
+				},
+				Actions: []configuration.Action{},
+			}
+			
+			// Add an action for each source
+			for _, source := range slider.Sources {
+				action := configuration.Action{
+					Type: configuration.SetVolume,
+					Target: &configuration.TypedTarget{
+						Type: source.Type,
+						Name: source.Name,
+					},
+				}
+				rule.Actions = append(rule.Actions, action)
+			}
+			
+			rules = append(rules, rule)
+		}
+	}
+	
+	// Add knob rules
+	for _, knob := range config.Controls.Knobs {
+		if len(knob.Sources) > 0 {
+			rule := configuration.Rule{
+				MidiMessage: configuration.MidiMessage{
+					DeviceName:        midiDevice.Name,
+					DeviceControlPath: knob.Path,
+				},
+				Actions: []configuration.Action{},
+			}
+			
+			// Add an action for each source
+			for _, source := range knob.Sources {
+				action := configuration.Action{
+					Type: configuration.SetVolume,
+					Target: &configuration.TypedTarget{
+						Type: source.Type,
+						Name: source.Name,
+					},
+				}
+				rule.Actions = append(rule.Actions, action)
+			}
+			
+			rules = append(rules, rule)
+		}
+	}
+	
+	// Add button rules
+	for _, button := range config.Controls.Buttons {
+		rule := configuration.Rule{
+			MidiMessage: configuration.MidiMessage{
+				DeviceName:        midiDevice.Name,
+				DeviceControlPath: button.Path,
+			},
+			Actions: []configuration.Action{},
+		}
+		
+		// Convert action type
+		var actionType configuration.PulseAudioActionType
+		switch button.Action {
+		case configuration.ToggleMuteAction:
+			actionType = configuration.ToggleMute
+		case configuration.SetDefaultOutputAction:
+			actionType = configuration.SetDefaultOutput
+		default:
+			continue // Skip unsupported actions
+		}
+		
+		// Add the action
+		action := configuration.Action{
+			Type: actionType,
+		}
+		
+		// Add target based on action type
+		if actionType == configuration.SetDefaultOutput {
+			action.Target = &configuration.Target{
+				Name: button.Target.Name,
+			}
+		} else {
+			action.Target = &configuration.TypedTarget{
+				Type: configuration.OutputDevice,
+				Name: button.Target.Name,
+			}
+		}
+		
+		rule.Actions = append(rule.Actions, action)
+		rules = append(rules, rule)
+	}
+
+	// Create MIDI client
+	midiClients := make([]*midi.MidiClient, 0, 1)
+	midiClient := midi.NewMidiClient(paClient, midiDevice, rules)
+	midiClients = append(midiClients, midiClient)
+	go midiClient.Run()
 
 	// Set up signal handling for graceful shutdown
 	setupSignalHandling()

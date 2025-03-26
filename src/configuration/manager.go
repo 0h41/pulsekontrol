@@ -92,19 +92,118 @@ func (cm *ConfigManager) SaveNow() {
 	log.Info().Str("path", cm.configPath).Msg("Configuration saved")
 }
 
-// UpdateMidiDeviceMapping updates a MIDI device's mapping to audio sources
-func (cm *ConfigManager) UpdateMidiDeviceMapping(deviceName string, controlId string, target interface{}) {
+// UpdateControlValue updates a control's value (0-100)
+func (cm *ConfigManager) UpdateControlValue(controlType string, controlId string, value int) {
 	cm.saveMutex.Lock()
 	defer cm.saveMutex.Unlock()
 
-	// TODO: Update the mapping in the configuration
-	// This would depend on the detailed structure of your rules
+	switch controlType {
+	case "slider":
+		if slider, ok := cm.config.Controls.Sliders[controlId]; ok {
+			slider.Value = value
+			cm.config.Controls.Sliders[controlId] = slider
+		}
+	case "knob":
+		if knob, ok := cm.config.Controls.Knobs[controlId]; ok {
+			knob.Value = value
+			cm.config.Controls.Knobs[controlId] = knob
+		}
+	}
 
 	// Notify subscribers
-	cm.Notify("mapping.updated", map[string]interface{}{
-		"deviceName": deviceName,
-		"controlId":  controlId,
-		"target":     target,
+	cm.Notify("control.value.updated", map[string]interface{}{
+		"type":  controlType,
+		"id":    controlId,
+		"value": value,
+	})
+
+	// Schedule save
+	cm.SaveWithDebounce()
+}
+
+// AssignSource assigns an audio source to a control
+func (cm *ConfigManager) AssignSource(controlType string, controlId string, source Source) {
+	cm.saveMutex.Lock()
+	defer cm.saveMutex.Unlock()
+
+	switch controlType {
+	case "slider":
+		if slider, ok := cm.config.Controls.Sliders[controlId]; ok {
+			// Check if source is already assigned to this control
+			for _, existingSource := range slider.Sources {
+				if existingSource.Type == source.Type && existingSource.Name == source.Name {
+					// Already assigned, do nothing
+					return
+				}
+			}
+			// Add the source
+			slider.Sources = append(slider.Sources, source)
+			cm.config.Controls.Sliders[controlId] = slider
+		}
+	case "knob":
+		if knob, ok := cm.config.Controls.Knobs[controlId]; ok {
+			// Check if source is already assigned to this control
+			for _, existingSource := range knob.Sources {
+				if existingSource.Type == source.Type && existingSource.Name == source.Name {
+					// Already assigned, do nothing
+					return
+				}
+			}
+			// Add the source
+			knob.Sources = append(knob.Sources, source)
+			cm.config.Controls.Knobs[controlId] = knob
+		}
+	}
+
+	// Notify subscribers
+	cm.Notify("source.assigned", map[string]interface{}{
+		"controlType": controlType,
+		"controlId":   controlId,
+		"source":      source,
+	})
+
+	// Schedule save
+	cm.SaveWithDebounce()
+}
+
+// UnassignSource removes an audio source from a control
+func (cm *ConfigManager) UnassignSource(controlType string, controlId string, sourceType PulseAudioTargetType, sourceName string) {
+	cm.saveMutex.Lock()
+	defer cm.saveMutex.Unlock()
+
+	switch controlType {
+	case "slider":
+		if slider, ok := cm.config.Controls.Sliders[controlId]; ok {
+			// Filter out the source to remove
+			var updatedSources []Source
+			for _, source := range slider.Sources {
+				if !(source.Type == sourceType && source.Name == sourceName) {
+					updatedSources = append(updatedSources, source)
+				}
+			}
+			slider.Sources = updatedSources
+			cm.config.Controls.Sliders[controlId] = slider
+		}
+	case "knob":
+		if knob, ok := cm.config.Controls.Knobs[controlId]; ok {
+			// Filter out the source to remove
+			var updatedSources []Source
+			for _, source := range knob.Sources {
+				if !(source.Type == sourceType && source.Name == sourceName) {
+					updatedSources = append(updatedSources, source)
+				}
+			}
+			knob.Sources = updatedSources
+			cm.config.Controls.Knobs[controlId] = knob
+		}
+	}
+
+	// Notify subscribers
+	cm.Notify("source.unassigned", map[string]interface{}{
+		"controlType": controlType,
+		"controlId":   controlId,
+		"sourceType":  sourceType,
+		"sourceName":  sourceName,
 	})
 
 	// Schedule save

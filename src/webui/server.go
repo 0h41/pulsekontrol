@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/0h41/pulsekontrol/src/configuration"
 	"github.com/0h41/pulsekontrol/src/pulseaudio"
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
@@ -23,10 +24,11 @@ type WebUIServer struct {
 	broadcast      chan []byte
 	configUpdateCh chan interface{}
 	paClient       *pulseaudio.PAClient
+	configManager  *configuration.ConfigManager
 	stopChan       chan struct{}
 }
 
-func NewWebUIServer(addr string, paClient *pulseaudio.PAClient) *WebUIServer {
+func NewWebUIServer(addr string, paClient *pulseaudio.PAClient, configManager *configuration.ConfigManager) *WebUIServer {
 	return &WebUIServer{
 		Addr: addr,
 		upgrader: websocket.Upgrader{
@@ -40,6 +42,7 @@ func NewWebUIServer(addr string, paClient *pulseaudio.PAClient) *WebUIServer {
 		broadcast:      make(chan []byte),
 		configUpdateCh: make(chan interface{}),
 		paClient:       paClient,
+		configManager:  configManager,
 		stopChan:       make(chan struct{}),
 	}
 }
@@ -169,7 +172,30 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				Str("sourceId", sourceId).
 				Msg("Assigning source to control")
 			
-			// TODO: Update configuration to add this assignment
+			// Find the audio source in the available sources
+			sources := s.paClient.GetAudioSources()
+			var sourceToAssign *pulseaudio.AudioSource
+			
+			for _, source := range sources {
+				if source.ID == sourceId {
+					sourceToAssign = &source
+					break
+				}
+			}
+			
+			if sourceToAssign == nil {
+				log.Error().Str("sourceId", sourceId).Msg("Source not found")
+				continue
+			}
+			
+			// Create configuration source
+			configSource := configuration.Source{
+				Type: configuration.PulseAudioTargetType(sourceToAssign.Type),
+				Name: sourceToAssign.Name,
+			}
+			
+			// Update configuration
+			s.configManager.AssignSource(controlType, controlId, configSource)
 			
 		case "unassignControl":
 			// Client wants to remove a source from a control
@@ -197,7 +223,29 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				Str("sourceId", sourceId).
 				Msg("Removing source from control")
 			
-			// TODO: Update configuration to remove this assignment
+			// Find the audio source in the available sources
+			sources := s.paClient.GetAudioSources()
+			var sourceToRemove *pulseaudio.AudioSource
+			
+			for _, source := range sources {
+				if source.ID == sourceId {
+					sourceToRemove = &source
+					break
+				}
+			}
+			
+			if sourceToRemove == nil {
+				log.Error().Str("sourceId", sourceId).Msg("Source not found")
+				continue
+			}
+			
+			// Remove from configuration
+			s.configManager.UnassignSource(
+				controlType,
+				controlId,
+				configuration.PulseAudioTargetType(sourceToRemove.Type),
+				sourceToRemove.Name,
+			)
 			
 		default:
 			log.Debug().Str("type", msgType).Msg("Unknown message type")
@@ -239,16 +287,69 @@ func (s *WebUIServer) monitorAudioSources() {
 			// Get audio sources
 			sources := s.paClient.GetAudioSources()
 			
-			// Create message
+			// Get control assignments
+			config := s.configManager.GetConfig()
+			
+			// Map of slider assignments (controlId -> sourceIds)
+			sliderAssignments := make(map[string][]string)
+			for id, slider := range config.Controls.Sliders {
+				sourceIds := []string{}
+				// For each source in the slider, find the matching audio source
+				for _, source := range slider.Sources {
+					found := false
+					// Find the source in our audio sources
+					for _, audioSource := range sources {
+						if audioSource.Type == string(source.Type) && audioSource.Name == source.Name {
+							sourceIds = append(sourceIds, audioSource.ID)
+							found = true
+							break
+						}
+					}
+					// If source not found in current sources, create a virtual ID for it
+					if !found {
+						virtualId := fmt.Sprintf("%s:%s", source.Type, source.Name)
+						sourceIds = append(sourceIds, virtualId)
+					}
+				}
+				sliderAssignments[id] = sourceIds
+			}
+			
+			// Map of knob assignments (controlId -> sourceIds)
+			knobAssignments := make(map[string][]string)
+			for id, knob := range config.Controls.Knobs {
+				sourceIds := []string{}
+				// For each source in the knob, find the matching audio source
+				for _, source := range knob.Sources {
+					found := false
+					// Find the source in our audio sources
+					for _, audioSource := range sources {
+						if audioSource.Type == string(source.Type) && audioSource.Name == source.Name {
+							sourceIds = append(sourceIds, audioSource.ID)
+							found = true
+							break
+						}
+					}
+					// If source not found in current sources, create a virtual ID for it
+					if !found {
+						virtualId := fmt.Sprintf("%s:%s", source.Type, source.Name)
+						sourceIds = append(sourceIds, virtualId)
+					}
+				}
+				knobAssignments[id] = sourceIds
+			}
+			
+			// Create message with sources and control mappings
 			message := map[string]interface{}{
-				"type":    "audioSourcesUpdate",
-				"sources": sources,
+				"type":              "audioSourcesUpdate",
+				"sources":           sources,
+				"sliderAssignments": sliderAssignments,
+				"knobAssignments":   knobAssignments,
 			}
 			
 			// Convert to JSON
 			jsonData, err := json.Marshal(message)
 			if err != nil {
-				log.Error().Err(err).Msg("Failed to marshal audio sources")
+				log.Error().Err(err).Msg("Failed to marshal audio sources and assignments")
 				continue
 			}
 			

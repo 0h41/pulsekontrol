@@ -85,6 +85,11 @@ function handleServerMessage(data) {
             break;
             
         case 'audioSourcesUpdate':
+            // Update both sources and assignments if provided
+            if (data.sliderAssignments && data.knobAssignments) {
+                appState.sliderAssignments = data.sliderAssignments;
+                appState.knobAssignments = data.knobAssignments;
+            }
             updateAudioSources(data.sources);
             break;
             
@@ -146,12 +151,20 @@ function updateAudioSources(sources) {
     knobsContainer.innerHTML = '';
     sourcesContainer.innerHTML = '';
     
+    // Get all assigned source IDs (flattened from arrays)
+    const allAssignedIds = [
+        ...Object.values(appState.sliderAssignments).flat(),
+        ...Object.values(appState.knobAssignments).flat()
+    ];
+    
     // Render slider controls with assignments
     appState.sliderControls.forEach(control => {
         const assignedSourceIds = appState.sliderAssignments[control.id] || [];
-        const assignedSources = assignedSourceIds.map(id => 
-            appState.audioSources.find(s => s.id === id)
-        ).filter(s => s); // Filter out any undefined values
+        
+        // Get the sources that exist in the current available sources
+        const availableSources = assignedSourceIds
+            .map(id => appState.audioSources.find(s => s.id === id))
+            .filter(s => s); // Filter out undefined values
             
         const controlDiv = document.createElement('div');
         controlDiv.className = 'mixer-channel slider-control';
@@ -159,9 +172,9 @@ function updateAudioSources(sources) {
         controlDiv.setAttribute('data-control-type', 'slider');
         controlDiv.setAttribute('draggable', 'false');
         
-        if (assignedSources.length > 0) {
-            // Show assigned sources
-            renderControlWithSources(controlDiv, control, assignedSources);
+        if (assignedSourceIds.length > 0) {
+            // Show assigned sources, including ones that might be unavailable
+            renderControlWithSources(controlDiv, control, assignedSourceIds, availableSources);
         } else {
             // Show empty control
             renderEmptyControl(controlDiv, control);
@@ -173,9 +186,11 @@ function updateAudioSources(sources) {
     // Render knob controls with assignments
     appState.knobControls.forEach(control => {
         const assignedSourceIds = appState.knobAssignments[control.id] || [];
-        const assignedSources = assignedSourceIds.map(id => 
-            appState.audioSources.find(s => s.id === id)
-        ).filter(s => s); // Filter out any undefined values
+        
+        // Get the sources that exist in the current available sources
+        const availableSources = assignedSourceIds
+            .map(id => appState.audioSources.find(s => s.id === id))
+            .filter(s => s); // Filter out undefined values
             
         const controlDiv = document.createElement('div');
         controlDiv.className = 'mixer-channel knob-control';
@@ -183,9 +198,9 @@ function updateAudioSources(sources) {
         controlDiv.setAttribute('data-control-type', 'knob');
         controlDiv.setAttribute('draggable', 'false');
         
-        if (assignedSources.length > 0) {
-            // Show assigned sources
-            renderControlWithSources(controlDiv, control, assignedSources);
+        if (assignedSourceIds.length > 0) {
+            // Show assigned sources, including ones that might be unavailable
+            renderControlWithSources(controlDiv, control, assignedSourceIds, availableSources);
         } else {
             // Show empty control
             renderEmptyControl(controlDiv, control);
@@ -193,12 +208,6 @@ function updateAudioSources(sources) {
         
         knobsContainer.appendChild(controlDiv);
     });
-    
-    // Get all assigned source IDs (flattened from arrays)
-    const allAssignedIds = [
-        ...Object.values(appState.sliderAssignments).flat(),
-        ...Object.values(appState.knobAssignments).flat()
-    ];
     
     // Only unassigned sources go in the right column
     const unassignedSources = appState.audioSources.filter(
@@ -240,7 +249,7 @@ function updateAudioSources(sources) {
     setupDropZones();
 }
 
-function renderControlWithSources(controlDiv, control, sources) {
+function renderControlWithSources(controlDiv, control, assignedSourceIds, availableSources) {
     // Add control visualization based on type
     if (controlDiv.getAttribute('data-control-type') === 'slider') {
         renderSliderVisualization(controlDiv, control);
@@ -266,7 +275,8 @@ function renderControlWithSources(controlDiv, control, sources) {
     sourcesList.addEventListener('dragleave', handleDragLeave);
     sourcesList.addEventListener('drop', handleDrop);
     
-    sources.forEach(source => {
+    // Render available sources first (those that exist in current audio sources)
+    availableSources.forEach(source => {
         const sourceItem = document.createElement('div');
         sourceItem.className = 'source-item';
         sourceItem.setAttribute('draggable', 'true');
@@ -289,6 +299,58 @@ function renderControlWithSources(controlDiv, control, sources) {
         sourceName.textContent = source.name;
         sourceName.title = source.name; // For tooltip on hover
         sourceItem.appendChild(sourceName);
+        
+        sourcesList.appendChild(sourceItem);
+    });
+    
+    // Find missing sources (those assigned but not currently available)
+    const availableIds = availableSources.map(s => s.id);
+    const missingSourceIds = assignedSourceIds.filter(id => !availableIds.includes(id));
+    
+    // Construct missing source objects based on what we can get from config
+    missingSourceIds.forEach(sourceId => {
+        // Look in the server's assignments to get information about this source
+        // We need to create a placeholder with at least a name
+        let sourceType = "unknown";
+        let sourceName = sourceId; // Fallback to showing ID if we can't find a name
+        
+        // Try to extract type and name from the source ID
+        // Format is often something like "playback:Chromium"
+        if (sourceId.includes(':')) {
+            const parts = sourceId.split(':');
+            sourceType = parts[0];
+            sourceName = parts.slice(1).join(':');
+        }
+        
+        const sourceItem = document.createElement('div');
+        sourceItem.className = 'source-item missing-source';
+        // Still draggable but visually different
+        sourceItem.setAttribute('draggable', 'true');
+        sourceItem.setAttribute('data-source-id', sourceId);
+        sourceItem.setAttribute('data-parent-control', control.id);
+        sourceItem.setAttribute('data-parent-type', controlDiv.getAttribute('data-control-type'));
+        
+        // Add drag event handlers
+        sourceItem.addEventListener('dragstart', handleDragStart);
+        sourceItem.addEventListener('dragend', handleDragEnd);
+        
+        // Add type badge
+        const typeBadge = document.createElement('span');
+        typeBadge.className = 'type-badge';
+        typeBadge.textContent = sourceType;
+        sourceItem.appendChild(typeBadge);
+        
+        // Add source name
+        const sourceNameElement = document.createElement('span');
+        sourceNameElement.textContent = sourceName;
+        sourceNameElement.title = sourceName; // For tooltip on hover
+        sourceItem.appendChild(sourceNameElement);
+        
+        // Add missing indicator
+        const missingIndicator = document.createElement('span');
+        missingIndicator.className = 'missing-indicator';
+        missingIndicator.textContent = ' (not available)';
+        sourceItem.appendChild(missingIndicator);
         
         sourcesList.appendChild(sourceItem);
     });

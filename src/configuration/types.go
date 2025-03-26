@@ -2,8 +2,7 @@ package configuration
 
 import "gopkg.in/yaml.v3"
 
-// MIDI Device
-
+// Legacy types - keep for compatibility during transition
 type MidiDeviceType string
 
 const (
@@ -18,8 +17,6 @@ type MidiDevice struct {
 	MidiInName  string         `yaml:"midiInName"`
 	MidiOutName string         `yaml:"midiOutName"`
 }
-
-// Rule
 
 type MidiMessageType string
 
@@ -50,15 +47,6 @@ const (
 	SetDefaultOutput PulseAudioActionType = "SetDefaultOutput"
 )
 
-type PulseAudioTargetType string
-
-const (
-	PlaybackStream PulseAudioTargetType = "PlaybackStream"
-	RecordStream   PulseAudioTargetType = "RecordStream"
-	OutputDevice   PulseAudioTargetType = "OutputDevice"
-	InputDevice    PulseAudioTargetType = "InputDevice"
-)
-
 type Target struct {
 	Name string `yaml:"name"`
 }
@@ -79,9 +67,82 @@ type Rule struct {
 	Actions     []Action    `yaml:"actions"`
 }
 
-// Configuration
-
-type Config struct {
+// Legacy Config structure
+type LegacyConfig struct {
 	MidiDevices []MidiDevice `yaml:"midiDevices"`
 	Rules       []Rule       `yaml:"rules"`
+}
+
+// New configuration format
+// Audio Source Target Types
+type PulseAudioTargetType string
+
+const (
+	PlaybackStream PulseAudioTargetType = "PlaybackStream"
+	RecordStream   PulseAudioTargetType = "RecordStream"
+	OutputDevice   PulseAudioTargetType = "OutputDevice"
+	InputDevice    PulseAudioTargetType = "InputDevice"
+)
+
+// Source represents an audio source or destination
+type Source struct {
+	Type PulseAudioTargetType `yaml:"type"`
+	Name string               `yaml:"name"`
+}
+
+// Button action types
+type ActionType string
+
+const (
+	ToggleMuteAction       ActionType = "ToggleMute"
+	SetDefaultOutputAction ActionType = "SetDefaultOutput"
+	SetDefaultInputAction  ActionType = "SetDefaultInput"
+	PlayPauseTransport     ActionType = "PlayPause"
+	StopTransport          ActionType = "Stop"
+)
+
+// ButtonTarget is the target for button actions
+type ButtonTarget struct {
+	Name string `yaml:"name"`
+}
+
+// SliderConfig represents a slider on the MIDI controller
+type SliderConfig struct {
+	Path    string   `yaml:"path"`    // The MIDI control path (e.g., "Group1/Slider")
+	Value   int      `yaml:"value"`   // Current value (0-100)
+	Sources []Source `yaml:"sources"` // Audio sources controlled by this slider
+}
+
+// KnobConfig represents a knob on the MIDI controller
+type KnobConfig struct {
+	Path    string   `yaml:"path"`    // The MIDI control path (e.g., "Group1/Knob") 
+	Value   int      `yaml:"value"`   // Current value (0-100)
+	Sources []Source `yaml:"sources"` // Audio sources controlled by this knob
+}
+
+// ButtonConfig represents a button on the MIDI controller
+type ButtonConfig struct {
+	Path   string       `yaml:"path"`   // The MIDI control path (e.g., "Transport/Play")
+	Action ActionType   `yaml:"action"` // Action type when button is pressed
+	Target ButtonTarget `yaml:"target"` // Target for the action
+}
+
+// DeviceConfig contains MIDI device settings
+type DeviceConfig struct {
+	Name    string `yaml:"name"`    // Display name for the device
+	InPort  string `yaml:"inPort"`  // MIDI input port name
+	OutPort string `yaml:"outPort"` // MIDI output port name
+}
+
+// Controls contains all controller mappings
+type Controls struct {
+	Sliders map[string]SliderConfig `yaml:"sliders,omitempty"`
+	Knobs   map[string]KnobConfig   `yaml:"knobs,omitempty"`
+	Buttons map[string]ButtonConfig `yaml:"buttons,omitempty"`
+}
+
+// Config is the root configuration structure
+type Config struct {
+	Device   DeviceConfig `yaml:"device"`   // MIDI device settings
+	Controls Controls     `yaml:"controls"` // Controller mappings
 }
