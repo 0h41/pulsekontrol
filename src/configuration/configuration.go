@@ -117,6 +117,15 @@ func Load() (Config, string, error) {
 		fmt.Sprintf("%s/.config/pulsekontrol/config.yaml", homeDir),
 	}
 
+	// Ensure the config directory exists regardless of whether a config file exists
+	configDir := fmt.Sprintf("%s/.config/pulsekontrol", homeDir)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return config, "", fmt.Errorf("could not create config directory: %w", err)
+	}
+
+	// Default path for creating a new config (the home directory path)
+	configPath = paths[1]
+
 	// Try to read from config paths
 	for _, path := range paths {
 		if content != nil {
@@ -133,15 +142,6 @@ func Load() (Config, string, error) {
 	if content == nil {
 		config = GetDefaultConfig()
 
-		// Write the default config to the home directory path
-		configPath = paths[1]
-
-		// Ensure directory exists
-		configDir := fmt.Sprintf("%s/.config/pulsekontrol", homeDir)
-		if err := os.MkdirAll(configDir, 0755); err != nil {
-			return config, "", fmt.Errorf("could not create config directory: %w", err)
-		}
-
 		// Marshal and save the default config
 		data, err := yaml.Marshal(config)
 		if err != nil {
@@ -152,6 +152,7 @@ func Load() (Config, string, error) {
 			return config, "", fmt.Errorf("failed to write default config: %w", err)
 		}
 
+		fmt.Printf("Created default configuration file at %s\n", configPath)
 		return config, configPath, nil
 	}
 
