@@ -112,16 +112,9 @@ type SliderConfig struct {
 
 // KnobConfig represents a knob on the MIDI controller
 type KnobConfig struct {
-	Path    string   `yaml:"path"`    // The MIDI control path (e.g., "Group1/Knob") 
+	Path    string   `yaml:"path"`    // The MIDI control path (e.g., "Group1/Knob")
 	Value   int      `yaml:"value"`   // Current value (0-100)
 	Sources []Source `yaml:"sources"` // Audio sources controlled by this knob
-}
-
-// ButtonConfig represents a button on the MIDI controller
-type ButtonConfig struct {
-	Path   string       `yaml:"path"`   // The MIDI control path (e.g., "Transport/Play")
-	Action ActionType   `yaml:"action"` // Action type when button is pressed
-	Target ButtonTarget `yaml:"target"` // Target for the action
 }
 
 // DeviceConfig contains MIDI device settings
@@ -135,7 +128,6 @@ type DeviceConfig struct {
 type Controls struct {
 	Sliders map[string]SliderConfig `yaml:"sliders,omitempty"`
 	Knobs   map[string]KnobConfig   `yaml:"knobs,omitempty"`
-	Buttons map[string]ButtonConfig `yaml:"buttons,omitempty"`
 }
 
 // Config is the root configuration structure

@@ -101,7 +101,6 @@ func GetDefaultConfig() Config {
 					Sources: []Source{},
 				},
 			},
-			Buttons: map[string]ButtonConfig{},
 		},
 	}
 }
@@ -133,26 +132,26 @@ func Load() (Config, string, error) {
 	// If no config found, create a default one
 	if content == nil {
 		config = GetDefaultConfig()
-		
+
 		// Write the default config to the home directory path
 		configPath = paths[1]
-		
+
 		// Ensure directory exists
 		configDir := fmt.Sprintf("%s/.config/pulsekontrol", homeDir)
 		if err := os.MkdirAll(configDir, 0755); err != nil {
 			return config, "", fmt.Errorf("could not create config directory: %w", err)
 		}
-		
+
 		// Marshal and save the default config
 		data, err := yaml.Marshal(config)
 		if err != nil {
 			return config, "", fmt.Errorf("failed to marshal default config: %w", err)
 		}
-		
+
 		if err := os.WriteFile(configPath, data, 0644); err != nil {
 			return config, "", fmt.Errorf("failed to write default config: %w", err)
 		}
-		
+
 		return config, configPath, nil
 	}
 
@@ -172,7 +171,7 @@ func Load() (Config, string, error) {
 
 	// Convert legacy format to new format
 	config = convertLegacyConfig(legacyConfig)
-	
+
 	// Set defaults for any missing fields
 	ensureDefaults(&config)
 
@@ -182,7 +181,7 @@ func Load() (Config, string, error) {
 		// Create backup of old format
 		backupPath := configPath + ".legacy"
 		os.Rename(configPath, backupPath)
-		
+
 		// Write new format
 		os.WriteFile(configPath, data, 0644)
 	}
@@ -193,7 +192,7 @@ func Load() (Config, string, error) {
 // Convert legacy config format to new format
 func convertLegacyConfig(legacyConfig LegacyConfig) Config {
 	config := GetDefaultConfig()
-	
+
 	// Process only the first MIDI device (as we're limiting to nanoKONTROL2)
 	if len(legacyConfig.MidiDevices) > 0 {
 		device := legacyConfig.MidiDevices[0]
@@ -203,7 +202,7 @@ func convertLegacyConfig(legacyConfig LegacyConfig) Config {
 			config.Device.OutPort = device.MidiOutName
 		}
 	}
-	
+
 	// Extract control assignments from the rules
 	for _, rule := range legacyConfig.Rules {
 		if rule.MidiMessage.DeviceControlPath != "" {
@@ -212,29 +211,29 @@ func convertLegacyConfig(legacyConfig LegacyConfig) Config {
 			if len(parts) != 2 {
 				continue
 			}
-			
+
 			// Skip non-standard controls for now
 			if !strings.HasPrefix(parts[0], "Group") {
 				continue
 			}
-			
+
 			// Parse the group number
 			var groupNum int
 			_, err := fmt.Sscanf(parts[0], "Group%d", &groupNum)
 			if err != nil || groupNum < 1 || groupNum > 8 {
 				continue
 			}
-			
+
 			controlPath := rule.MidiMessage.DeviceControlPath
 			controlType := parts[1]
 			controlId := fmt.Sprintf("%s%d", strings.ToLower(controlType), groupNum)
-			
+
 			// Handle different control types
 			switch controlType {
 			case "Slider":
 				slider := config.Controls.Sliders[controlId]
 				slider.Path = controlPath
-				
+
 				// Add sources from actions
 				for _, action := range rule.Actions {
 					if action.Type == SetVolume && action.Target != nil {
@@ -247,13 +246,13 @@ func convertLegacyConfig(legacyConfig LegacyConfig) Config {
 						}
 					}
 				}
-				
+
 				config.Controls.Sliders[controlId] = slider
-				
+
 			case "Knob":
 				knob := config.Controls.Knobs[controlId]
 				knob.Path = controlPath
-				
+
 				// Add sources from actions
 				for _, action := range rule.Actions {
 					if action.Type == SetVolume && action.Target != nil {
@@ -266,35 +265,12 @@ func convertLegacyConfig(legacyConfig LegacyConfig) Config {
 						}
 					}
 				}
-				
+
 				config.Controls.Knobs[controlId] = knob
-				
-			case "Solo", "Record":
-				// Add button support later (mute removed)
-				buttonId := fmt.Sprintf("%s%d", strings.ToLower(controlType), groupNum)
-				button := ButtonConfig{
-					Path: controlPath,
-				}
-				
-				// Set action based on first action
-				if len(rule.Actions) > 0 {
-					action := rule.Actions[0]
-					if action.Type == SetDefaultOutput {
-						button.Action = SetDefaultOutputAction
-						
-						if target, ok := action.Target.(*Target); ok {
-							button.Target = ButtonTarget{
-								Name: target.Name,
-							}
-						}
-					}
-				}
-				
-				config.Controls.Buttons[buttonId] = button
 			}
 		}
 	}
-	
+
 	return config
 }
 
@@ -317,9 +293,6 @@ func ensureDefaults(config *Config) {
 	}
 	if config.Controls.Knobs == nil {
 		config.Controls.Knobs = make(map[string]KnobConfig)
-	}
-	if config.Controls.Buttons == nil {
-		config.Controls.Buttons = make(map[string]ButtonConfig)
 	}
 
 	// Add default sliders if missing

@@ -8,11 +8,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/DavidGamba/go-getoptions"
 	"github.com/0h41/pulsekontrol/src/configuration"
 	"github.com/0h41/pulsekontrol/src/midi"
 	"github.com/0h41/pulsekontrol/src/pulseaudio"
 	"github.com/0h41/pulsekontrol/src/webui"
+	"github.com/DavidGamba/go-getoptions"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -70,23 +70,23 @@ func Run() {
 		os.Exit(1)
 	}
 	log.Info().Msgf("Loaded configuration from %s", path)
-	
+
 	// Create configuration manager
 	configManager := configuration.NewConfigManager(config, path)
-	
+
 	// Start web UI if enabled
 	var webServer *webui.WebUIServer
 	if !opt.Called("no-webui") {
 		webServer = webui.NewWebUIServer(*webAddr, paClient, configManager)
-		
+
 		// Set up configuration update notifications to WebUI
 		configManager.Subscribe("mapping.updated", func(data interface{}) {
 			// Convert to JSON and broadcast to clients
-			// This is a simplified example - in a real implementation, 
+			// This is a simplified example - in a real implementation,
 			// you would serialize the data and broadcast it
 			webServer.NotifyConfigUpdate(data)
 		})
-		
+
 		go func() {
 			if err := webServer.Start(); err != nil {
 				log.Error().Err(err).Msg("Failed to start web server")
@@ -103,7 +103,7 @@ func Run() {
 		MidiInName:  config.Device.InPort,
 		MidiOutName: config.Device.OutPort,
 	}
-	
+
 	// Create rules from control assignments
 	rules := createRulesFromConfig(config, midiDevice)
 
@@ -111,32 +111,32 @@ func Run() {
 	midiClients := make([]*midi.MidiClient, 0, 1)
 	midiClient := midi.NewMidiClient(paClient, midiDevice, rules, configManager)
 	midiClients = append(midiClients, midiClient)
-	
+
 	// Subscribe to configuration changes to update rules dynamically
 	configManager.Subscribe("source.assigned", func(data interface{}) {
 		// Regenerate rules when sources are assigned
 		log.Info().Msg("Source assigned, updating MIDI rules")
-		
+
 		// Recreate rules from current configuration - get the latest config!
 		currentConfig := configManager.GetConfig()
 		newRules := createRulesFromConfig(*currentConfig, midiDevice)
-		
+
 		// Update the MIDI client with the new rules
 		midiClient.UpdateRules(newRules)
 	})
-	
+
 	configManager.Subscribe("source.unassigned", func(data interface{}) {
 		// Regenerate rules when sources are unassigned
 		log.Info().Msg("Source unassigned, updating MIDI rules")
-		
+
 		// Recreate rules from current configuration - get the latest config!
 		currentConfig := configManager.GetConfig()
 		newRules := createRulesFromConfig(*currentConfig, midiDevice)
-		
+
 		// Update the MIDI client with the new rules
 		midiClient.UpdateRules(newRules)
 	})
-	
+
 	go midiClient.Run()
 
 	// Set up signal handling for graceful shutdown
@@ -149,7 +149,7 @@ func Run() {
 func setupSignalHandling() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	
+
 	go func() {
 		sig := <-sigChan
 		log.Info().Msgf("Received signal %s, shutting down...", sig)
@@ -161,20 +161,20 @@ func setupSignalHandling() {
 // Helper to extract a group number from a control path
 func extractGroupNumber(path string) (int, error) {
 	var groupNumber int
-	
+
 	// Try to parse "GroupX/..." format
 	_, err := fmt.Sscanf(path, "Group%d/", &groupNumber)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse group number from path %s: %w", path, err)
 	}
-	
+
 	return groupNumber, nil
 }
 
 // createRulesFromConfig generates MIDI rules from the current configuration
 func createRulesFromConfig(config configuration.Config, midiDevice configuration.MidiDevice) []configuration.Rule {
 	var rules []configuration.Rule
-	
+
 	// Add slider rules
 	for _, slider := range config.Controls.Sliders {
 		if len(slider.Sources) > 0 {
@@ -184,10 +184,10 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 				log.Error().Err(err).Str("path", slider.Path).Msg("Failed to parse slider path")
 				continue
 			}
-			
+
 			// For nanoKONTROL2, slider controllers are 0-7 for groups 1-8
 			controller := uint8(groupNumber - 1)
-			
+
 			rule := configuration.Rule{
 				MidiMessage: configuration.MidiMessage{
 					DeviceName:        midiDevice.Name,
@@ -198,7 +198,7 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 				},
 				Actions: []configuration.Action{},
 			}
-			
+
 			// Add an action for each source
 			for _, source := range slider.Sources {
 				// Convert the target type from the new config format to the legacy format
@@ -217,7 +217,7 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 				default:
 					targetType = source.Type // Use as is if it matches legacy format
 				}
-				
+
 				action := configuration.Action{
 					Type: configuration.SetVolume,
 					Target: &configuration.TypedTarget{
@@ -227,14 +227,14 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 				}
 				rule.Actions = append(rule.Actions, action)
 			}
-			
+
 			rules = append(rules, rule)
 			log.Debug().
-				Msgf("Added rule for slider path %s with %d sources (controller=%d)", 
+				Msgf("Added rule for slider path %s with %d sources (controller=%d)",
 					slider.Path, len(slider.Sources), controller)
 		}
 	}
-	
+
 	// Add knob rules
 	for _, knob := range config.Controls.Knobs {
 		if len(knob.Sources) > 0 {
@@ -244,10 +244,10 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 				log.Error().Err(err).Str("path", knob.Path).Msg("Failed to parse knob path")
 				continue
 			}
-			
+
 			// For nanoKONTROL2, knob controllers are 16-23 for groups 1-8
 			controller := uint8(16 + groupNumber - 1)
-			
+
 			rule := configuration.Rule{
 				MidiMessage: configuration.MidiMessage{
 					DeviceName:        midiDevice.Name,
@@ -258,7 +258,7 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 				},
 				Actions: []configuration.Action{},
 			}
-			
+
 			// Add an action for each source
 			for _, source := range knob.Sources {
 				// Convert the target type from the new config format to the legacy format
@@ -277,7 +277,7 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 				default:
 					targetType = source.Type // Use as is if it matches legacy format
 				}
-				
+
 				action := configuration.Action{
 					Type: configuration.SetVolume,
 					Target: &configuration.TypedTarget{
@@ -287,49 +287,13 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 				}
 				rule.Actions = append(rule.Actions, action)
 			}
-			
+
 			rules = append(rules, rule)
 			log.Debug().
-				Msgf("Added rule for knob path %s with %d sources (controller=%d)", 
+				Msgf("Added rule for knob path %s with %d sources (controller=%d)",
 					knob.Path, len(knob.Sources), controller)
 		}
 	}
-	
-	// Add button rules (not doing direct controller mapping for buttons since they're more complex)
-	for _, button := range config.Controls.Buttons {
-		rule := configuration.Rule{
-			MidiMessage: configuration.MidiMessage{
-				DeviceName:        midiDevice.Name,
-				DeviceControlPath: button.Path,
-			},
-			Actions: []configuration.Action{},
-		}
-		
-		// Convert action type
-		var actionType configuration.PulseAudioActionType
-		switch button.Action {
-		// Mute functionality removed
-		case configuration.SetDefaultOutputAction:
-			actionType = configuration.SetDefaultOutput
-		default:
-			log.Debug().Msgf("Skipping unsupported button action: %s", button.Action)
-			continue // Skip unsupported actions
-		}
-		
-		// Add the action
-		action := configuration.Action{
-			Type: actionType,
-		}
-		
-		// Add target for SetDefaultOutput action
-		action.Target = &configuration.Target{
-			Name: button.Target.Name,
-		}
-		
-		rule.Actions = append(rule.Actions, action)
-		rules = append(rules, rule)
-		log.Debug().Msgf("Added rule for button path %s with action %s", button.Path, button.Action)
-	}
-	
+
 	return rules
 }
