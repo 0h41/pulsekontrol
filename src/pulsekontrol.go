@@ -107,34 +107,7 @@ func Run() {
 	var rules []configuration.Rule
 	
 	// Add slider rules
-	// First, add a hardcoded rule for the first slider to control Chromium
-	firstSliderRule := configuration.Rule{
-		MidiMessage: configuration.MidiMessage{
-			DeviceName:        midiDevice.Name,
-			DeviceControlPath: "Group1/Slider", // First slider
-		},
-		Actions: []configuration.Action{
-			{
-				Type: configuration.SetVolume,
-				Target: &configuration.TypedTarget{
-					Type: configuration.PlaybackStream,
-					Name: "Chromium", // Hardcoded to control Chromium source
-				},
-			},
-		},
-	}
-	rules = append(rules, firstSliderRule)
-	log.Info().Msg("Hardcoded first slider to control volume of Chromium")
-	
-	// Then process the rest of the sliders (starting from second)
-	sliderCount := 0
 	for _, slider := range config.Controls.Sliders {
-		sliderCount++
-		if sliderCount == 1 {
-			// Skip the first slider as we've already hardcoded it
-			continue
-		}
-		
 		if len(slider.Sources) > 0 {
 			rule := configuration.Rule{
 				MidiMessage: configuration.MidiMessage{
@@ -146,10 +119,25 @@ func Run() {
 			
 			// Add an action for each source
 			for _, source := range slider.Sources {
+				// Convert the target type from the new config format to the legacy format
+				var targetType configuration.PulseAudioTargetType
+				switch source.Type {
+				case "playback":
+					targetType = configuration.PlaybackStream
+				case "record":
+					targetType = configuration.RecordStream
+				case "output":
+					targetType = configuration.OutputDevice
+				case "input":
+					targetType = configuration.InputDevice
+				default:
+					targetType = source.Type // Use as is if it matches legacy format
+				}
+				
 				action := configuration.Action{
 					Type: configuration.SetVolume,
 					Target: &configuration.TypedTarget{
-						Type: source.Type,
+						Type: targetType,
 						Name: source.Name,
 					},
 				}
@@ -157,6 +145,7 @@ func Run() {
 			}
 			
 			rules = append(rules, rule)
+			log.Debug().Msgf("Added rule for slider path %s with %d sources", slider.Path, len(slider.Sources))
 		}
 	}
 	
@@ -173,10 +162,25 @@ func Run() {
 			
 			// Add an action for each source
 			for _, source := range knob.Sources {
+				// Convert the target type from the new config format to the legacy format
+				var targetType configuration.PulseAudioTargetType
+				switch source.Type {
+				case "playback":
+					targetType = configuration.PlaybackStream
+				case "record":
+					targetType = configuration.RecordStream
+				case "output":
+					targetType = configuration.OutputDevice
+				case "input":
+					targetType = configuration.InputDevice
+				default:
+					targetType = source.Type // Use as is if it matches legacy format
+				}
+				
 				action := configuration.Action{
 					Type: configuration.SetVolume,
 					Target: &configuration.TypedTarget{
-						Type: source.Type,
+						Type: targetType,
 						Name: source.Name,
 					},
 				}
@@ -184,6 +188,7 @@ func Run() {
 			}
 			
 			rules = append(rules, rule)
+			log.Debug().Msgf("Added rule for knob path %s with %d sources", knob.Path, len(knob.Sources))
 		}
 	}
 	
@@ -205,6 +210,7 @@ func Run() {
 		case configuration.SetDefaultOutputAction:
 			actionType = configuration.SetDefaultOutput
 		default:
+			log.Debug().Msgf("Skipping unsupported button action: %s", button.Action)
 			continue // Skip unsupported actions
 		}
 		
@@ -227,6 +233,7 @@ func Run() {
 		
 		rule.Actions = append(rule.Actions, action)
 		rules = append(rules, rule)
+		log.Debug().Msgf("Added rule for button path %s with action %s", button.Path, button.Action)
 	}
 
 	// Create MIDI client

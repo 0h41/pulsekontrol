@@ -1,0 +1,96 @@
+device:
+    name: Korg nanoKontrol2
+    inPort: nanoKONTROL2 nanoKONTROL2 _ CTR
+    outPort: nanoKONTROL2 nanoKONTROL2 _ CTR
+controls:
+    sliders:
+        slider1:
+            path: Group1/Slider
+            value: 43
+            sources:
+                - type: PlaybackStream
+                  name: Chromium
+        slider2:
+            path: Group2/Slider
+            value: 56
+            sources: []
+        slider3:
+            path: Group3/Slider
+            value: 43
+            sources: []
+        slider4:
+            path: Group4/Slider
+            value: 53
+            sources: []
+        slider5:
+            path: Group5/Slider
+            value: 65
+            sources: []
+        slider6:
+            path: Group6/Slider
+            value: 56
+            sources: []
+        slider7:
+            path: Group7/Slider
+            value: 56
+            sources: []
+        slider8:
+            path: Group8/Slider
+            value: 62
+            sources: []
+    knobs:
+        knob1:
+            path: Group1/Knob
+            value: 65
+            sources: []
+        knob2:
+            path: Group2/Knob
+            value: 48
+            sources: []
+        knob3:
+            path: Group3/Knob
+            value: 45
+            sources: []
+        knob4:
+            path: Group4/Knob
+            value: 48
+            sources: []
+        knob5:
+            path: Group5/Knob
+            value: 59
+            sources: []
+        knob6:
+            path: Group6/Knob
+            value: 49
+            sources: []
+        knob7:
+            path: Group7/Knob
+            value: 47
+            sources: []
+        knob8:
+            path: Group8/Knob
+            value: 77
+            sources:
+                - type: OutputDevice
+                  name: FiiO USB DAC-E10 Analog Stereo
+    buttons:
+        mute1:
+            path: Group1/Mute
+            action: ToggleMute
+            target:
+                name: ""
+        mute3:
+            path: Group3/Mute
+            action: ToggleMute
+            target:
+                name: ""
+        mute4:
+            path: Group4/Mute
+            action: ToggleMute
+            target:
+                name: ""
+        mute8:
+            path: Group8/Mute
+            action: ToggleMute
+            target:
+                name: ""
