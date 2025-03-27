@@ -99,7 +99,7 @@ func Run() {
 	// This is temporary compatibility code until the MIDI client is updated
 	midiDevice := configuration.MidiDevice{
 		Name:        config.Device.Name,
-		Type:        configuration.KorgNanoKontrol2,
+		Type:        configuration.KorgNanoKontrol2, // Only support KORG nanoKONTROL2
 		MidiInName:  config.Device.InPort,
 		MidiOutName: config.Device.OutPort,
 	}
@@ -308,8 +308,7 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 		// Convert action type
 		var actionType configuration.PulseAudioActionType
 		switch button.Action {
-		case configuration.ToggleMuteAction:
-			actionType = configuration.ToggleMute
+		// Mute functionality removed
 		case configuration.SetDefaultOutputAction:
 			actionType = configuration.SetDefaultOutput
 		default:
@@ -322,16 +321,9 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 			Type: actionType,
 		}
 		
-		// Add target based on action type
-		if actionType == configuration.SetDefaultOutput {
-			action.Target = &configuration.Target{
-				Name: button.Target.Name,
-			}
-		} else {
-			action.Target = &configuration.TypedTarget{
-				Type: configuration.OutputDevice,
-				Name: button.Target.Name,
-			}
+		// Add target for SetDefaultOutput action
+		action.Target = &configuration.Target{
+			Name: button.Target.Name,
 		}
 		
 		rule.Actions = append(rule.Actions, action)

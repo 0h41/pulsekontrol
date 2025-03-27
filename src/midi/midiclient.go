@@ -3,7 +3,6 @@ package midi
 import (
 	"fmt"
 	"github.com/0h41/pulsekontrol/src/configuration"
-	akaiLpd8 "github.com/0h41/pulsekontrol/src/device/akai/lpd8"
 	korgNanokontrol2 "github.com/0h41/pulsekontrol/src/device/korg/nanokontrol2"
 	"github.com/0h41/pulsekontrol/src/pulseaudio"
 	"github.com/rs/zerolog"
@@ -194,13 +193,6 @@ func (client *MidiClient) Run() {
 					if err := client.PAClient.ProcessVolumeAction(action, volumePercent); err != nil {
 						client.log.Error().Err(err)
 					}
-				case configuration.ToggleMute:
-					if value == 0 {
-						return
-					}
-					if err := client.PAClient.ProcessToggleMute(action); err != nil {
-						client.log.Error().Err(err)
-					}
 				case configuration.SetDefaultOutput:
 					if value == 0 {
 						return
@@ -356,15 +348,9 @@ func (client *MidiClient) Run() {
 		panic(err)
 	}
 
-	if client.MidiDevice.Type == configuration.AkaiLpd8 {
-		device := akaiLpd8.New(client.MidiDevice.Name)
-		// client.log.Info().Msgf("device %+v", device)
-		// device.OnStart(sysExChannel, out)
-		client.Rules = device.UpdateRules(client.Rules, sysExChannel, out)
-	} else if client.MidiDevice.Type == configuration.KorgNanoKontrol2 {
+	// Only support KORG nanoKONTROL2
+	if client.MidiDevice.Type == configuration.KorgNanoKontrol2 {
 		device := korgNanokontrol2.New(client.MidiDevice.Name)
-		// client.log.Info().Msgf("device %+v", device)
-		// device.OnStart(sysExChannel, out)
 		client.Rules = device.UpdateRules(client.Rules, sysExChannel, out)
 	}
 

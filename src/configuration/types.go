@@ -7,7 +7,6 @@ type MidiDeviceType string
 
 const (
 	Generic          MidiDeviceType = "Generic"
-	AkaiLpd8         MidiDeviceType = "AkaiLpd8"
 	KorgNanoKontrol2 MidiDeviceType = "KorgNanoKontrol2"
 )
 
@@ -43,7 +42,6 @@ type PulseAudioActionType string
 
 const (
 	SetVolume        PulseAudioActionType = "SetVolume"
-	ToggleMute       PulseAudioActionType = "ToggleMute"
 	SetDefaultOutput PulseAudioActionType = "SetDefaultOutput"
 )
 
@@ -94,7 +92,6 @@ type Source struct {
 type ActionType string
 
 const (
-	ToggleMuteAction       ActionType = "ToggleMute"
 	SetDefaultOutputAction ActionType = "SetDefaultOutput"
 	SetDefaultInputAction  ActionType = "SetDefaultInput"
 	PlayPauseTransport     ActionType = "PlayPause"

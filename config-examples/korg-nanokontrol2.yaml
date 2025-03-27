@@ -10,7 +10,7 @@ rules:
       deviceName: Korg nanoKontrol2
       # Korg nanoKontrol2 device control paths
       # [
-      #   Group[1-8]/[Slider|Knob|Solo|Mute|Record] |
+      #   Group[1-8]/[Slider|Knob|Solo|Record] |
       #   Transport/Track/[Prev|Next] |
       #   Transport/Cycle |
       #   Transport/Marker/[Set|Prev|Next] |
@@ -19,14 +19,6 @@ rules:
       deviceControlPath: Group1/Slider
     actions:
       - type: SetVolume
-        target:
-          type: OutputDevice
-          name: Default
-  - midiMessage:
-      deviceName: Korg nanoKontrol2
-      deviceControlPath: Group1/Mute
-    actions:
-      - type: ToggleMute
         target:
           type: OutputDevice
           name: Default
@@ -57,32 +49,12 @@ rules:
         target:
           type: PlaybackStream
           name: Firefox
-  - midiMessage:
-      deviceName: Korg nanoKontrol2
-      deviceControlPath: Group2/Mute
-    actions:
-      - type: ToggleMute
-        target:
-          type: PlaybackStream
-          name: Google Chrome
-      - type: ToggleMute
-        target:
-          type: PlaybackStream
-          name: Firefox
   # Spotify
   - midiMessage:
       deviceName: Korg nanoKontrol2
       deviceControlPath: Group3/Slider
     actions:
       - type: SetVolume
-        target:
-          type: PlaybackStream
-          name: spotify
-  - midiMessage:
-      deviceName: Korg nanoKontrol2
-      deviceControlPath: Group3/Mute
-    actions:
-      - type: ToggleMute
         target:
           type: PlaybackStream
           name: spotify
@@ -95,28 +67,12 @@ rules:
         target:
           type: PlaybackStream
           name: Chromium
-  - midiMessage:
-      deviceName: Korg nanoKontrol2
-      deviceControlPath: Group4/Mute
-    actions:
-      - type: ToggleMute
-        target:
-          type: PlaybackStream
-          name: Chromium
   # Games
   - midiMessage:
       deviceName: Korg nanoKontrol2
       deviceControlPath: Group5/Slider
     actions:
       - type: SetVolume
-        target:
-          type: PlaybackStream
-          name: Rocket League
-  - midiMessage:
-      deviceName: Korg nanoKontrol2
-      deviceControlPath: Group5/Mute
-    actions:
-      - type: ToggleMute
         target:
           type: PlaybackStream
           name: Rocket League

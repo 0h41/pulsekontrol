@@ -21,7 +21,6 @@ type AudioSource struct {
 	Name     string `json:"name"`
 	Type     string `json:"type"`
 	Volume   int    `json:"volume"`
-	Muted    bool   `json:"muted"`
 }
 
 type PAClient struct {
@@ -58,65 +57,57 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 	
 	// Add outputs (sinks)
 	lo.ForEach(client.outputs, func(stream Stream, i int) {
-		// Default volume and mute state
+		// Default volume
 		volume := 75
-		muted := false
 		
 		// We use estimated values since we can't directly access the volume properties
 		// In a real implementation, we would need to query the actual volume
-		// and mute state using the pulseaudio library's methods
+		// using the pulseaudio library's methods
 		
 		sources = append(sources, AudioSource{
 			ID:       stream.fullName,
 			Name:     stream.name,
 			Type:     "output",
 			Volume:   volume,
-			Muted:    muted,
 		})
 	})
 	
 	// Add inputs (sources)
 	lo.ForEach(client.inputs, func(stream Stream, i int) {
-		// Default volume and mute state
+		// Default volume
 		volume := 75
-		muted := false
 		
 		sources = append(sources, AudioSource{
 			ID:       stream.fullName,
 			Name:     stream.name,
 			Type:     "input",
 			Volume:   volume,
-			Muted:    muted,
 		})
 	})
 	
 	// Add playback streams (sink inputs)
 	lo.ForEach(client.playbackStreams, func(stream Stream, i int) {
-		// Default volume and mute state
+		// Default volume
 		volume := 75
-		muted := false
 		
 		sources = append(sources, AudioSource{
 			ID:       stream.fullName,
 			Name:     stream.name,
 			Type:     "playback",
 			Volume:   volume,
-			Muted:    muted,
 		})
 	})
 	
 	// Add record streams (source outputs)
 	lo.ForEach(client.recordStreams, func(stream Stream, i int) {
-		// Default volume and mute state
+		// Default volume
 		volume := 75
-		muted := false
 		
 		sources = append(sources, AudioSource{
 			ID:       stream.fullName,
 			Name:     stream.name,
 			Type:     "record",
 			Volume:   volume,
-			Muted:    muted,
 		})
 	})
 	
@@ -265,66 +256,6 @@ func (client *PAClient) ProcessVolumeAction(action configuration.Action, volumeP
 	return nil
 }
 
-func (client *PAClient) ProcessToggleMute(action configuration.Action) error {
-	var streams []Stream
-	client.refreshStreams()
-	switch target := action.Target.(type) {
-	case *configuration.TypedTarget:
-		if target.Type == configuration.OutputDevice {
-			if target.Name == "Default" {
-				if defaultSink, err := client.context.GetDefaultSink(); err == nil {
-					streams = slices.Concat(streams, lo.Filter(client.outputs, func(stream Stream, i int) bool {
-						return stream.fullName == defaultSink.Name
-					}))
-				}
-			} else {
-				streams = slices.Concat(streams, lo.Filter(client.outputs, func(stream Stream, i int) bool {
-					return stream.name == target.Name
-				}))
-			}
-		} else if target.Type == configuration.InputDevice {
-			if target.Name == "Default" {
-				if defaultSource, err := client.context.GetDefaultSource(); err == nil {
-					streams = slices.Concat(streams, lo.Filter(client.inputs, func(stream Stream, i int) bool {
-						return stream.fullName == defaultSource.Name
-					}))
-				}
-			} else {
-				streams = slices.Concat(streams, lo.Filter(client.inputs, func(stream Stream, i int) bool {
-					return stream.name == target.Name
-				}))
-			}
-		} else if target.Type == configuration.PlaybackStream {
-			streams = slices.Concat(streams, lo.Filter(client.playbackStreams, func(stream Stream, i int) bool {
-				return stream.name == target.Name
-			}))
-		} else if target.Type == configuration.RecordStream {
-			streams = slices.Concat(streams, lo.Filter(client.recordStreams, func(stream Stream, i int) bool {
-				return stream.name == target.Name
-			}))
-		}
-	case *configuration.Target:
-	default:
-	}
-	lo.ForEach(streams, func(stream Stream, index int) {
-		switch st := stream.paStream.(type) {
-		case pulseaudio.Sink:
-			st.ToggleMute()
-			client.log.Debug().Msgf("Toggled mute on %s", stream.name)
-		case pulseaudio.SinkInput:
-			st.ToggleMute()
-			client.log.Debug().Msgf("Toggled mute on %s", stream.name)
-		case pulseaudio.Source:
-			st.ToggleMute()
-			client.log.Debug().Msgf("Toggled mute on %s", stream.name)
-		case pulseaudio.SourceOutput:
-			st.ToggleMute()
-			client.log.Debug().Msgf("Toggled mute on %s", stream.name)
-		}
-	})
-	return nil
-}
-
 func (client *PAClient) SetDefaultOutput(action configuration.Action) error {
 	client.refreshStreams()
 	switch target := action.Target.(type) {
@@ -345,4 +276,3 @@ func (client *PAClient) SetDefaultOutput(action configuration.Action) error {
 	}
 	return nil
 }
-

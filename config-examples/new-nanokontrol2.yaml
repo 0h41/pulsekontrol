@@ -62,8 +62,3 @@ controls:
       path: "Transport/Track/Next"
       action: "SetDefaultOutput"
       target: { name: "UMC204HD 192k Line B" }
-      
-    mute1:
-      path: "Group1/Mute"
-      action: "ToggleMute"
-      target: { name: "Default" }

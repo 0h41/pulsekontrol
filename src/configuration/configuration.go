@@ -269,8 +269,8 @@ func convertLegacyConfig(legacyConfig LegacyConfig) Config {
 				
 				config.Controls.Knobs[controlId] = knob
 				
-			case "Mute", "Solo", "Record":
-				// Add button support later
+			case "Solo", "Record":
+				// Add button support later (mute removed)
 				buttonId := fmt.Sprintf("%s%d", strings.ToLower(controlType), groupNum)
 				button := ButtonConfig{
 					Path: controlPath,
@@ -279,14 +279,10 @@ func convertLegacyConfig(legacyConfig LegacyConfig) Config {
 				// Set action based on first action
 				if len(rule.Actions) > 0 {
 					action := rule.Actions[0]
-					if action.Type == ToggleMute {
-						button.Action = ToggleMuteAction
+					if action.Type == SetDefaultOutput {
+						button.Action = SetDefaultOutputAction
 						
-						if typedTarget, ok := action.Target.(*TypedTarget); ok {
-							button.Target = ButtonTarget{
-								Name: typedTarget.Name,
-							}
-						} else if target, ok := action.Target.(*Target); ok {
+						if target, ok := action.Target.(*Target); ok {
 							button.Target = ButtonTarget{
 								Name: target.Name,
 							}
