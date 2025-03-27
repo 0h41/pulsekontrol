@@ -147,6 +147,32 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			
 			// TODO: Implement volume change via pulseaudio client
 			
+		case "updateControlValue":
+			// Client wants to update a control's value
+			controlId, ok := clientMsg["controlId"].(string)
+			if !ok {
+				log.Error().Msg("updateControlValue missing controlId")
+				continue
+			}
+			
+			controlType, ok := clientMsg["controlType"].(string)
+			if !ok {
+				log.Error().Msg("updateControlValue missing controlType")
+				continue
+			}
+			
+			valueFloat, ok := clientMsg["value"].(float64)
+			if !ok {
+				log.Error().Msg("updateControlValue missing value or not a number")
+				continue
+			}
+			
+			value := int(valueFloat)
+			log.Debug().Str("controlId", controlId).Str("controlType", controlType).Int("value", value).Msg("Updating control value")
+			
+			// Update configuration
+			s.configManager.UpdateControlValue(controlType, controlId, value)
+			
 		case "assignControl":
 			// Client wants to assign a source to a control
 			controlId, ok := clientMsg["controlId"].(string)
@@ -336,6 +362,7 @@ func (s *WebUIServer) monitorAudioSources() {
 			
 			// Map of slider assignments (controlId -> sourceIds)
 			sliderAssignments := make(map[string][]string)
+			sliderValues := make(map[string]int)
 			for id, slider := range config.Controls.Sliders {
 				sourceIds := []string{}
 				// For each source in the slider, find the matching audio source
@@ -356,10 +383,12 @@ func (s *WebUIServer) monitorAudioSources() {
 					}
 				}
 				sliderAssignments[id] = sourceIds
+				sliderValues[id] = slider.Value
 			}
 			
 			// Map of knob assignments (controlId -> sourceIds)
 			knobAssignments := make(map[string][]string)
+			knobValues := make(map[string]int)
 			for id, knob := range config.Controls.Knobs {
 				sourceIds := []string{}
 				// For each source in the knob, find the matching audio source
@@ -380,6 +409,7 @@ func (s *WebUIServer) monitorAudioSources() {
 					}
 				}
 				knobAssignments[id] = sourceIds
+				knobValues[id] = knob.Value
 			}
 			
 			// Create message with sources and control mappings
@@ -387,7 +417,9 @@ func (s *WebUIServer) monitorAudioSources() {
 				"type":              "audioSourcesUpdate",
 				"sources":           sources,
 				"sliderAssignments": sliderAssignments,
+				"sliderValues":      sliderValues,
 				"knobAssignments":   knobAssignments,
+				"knobValues":        knobValues,
 			}
 			
 			// Convert to JSON

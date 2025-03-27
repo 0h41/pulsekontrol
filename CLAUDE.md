@@ -40,3 +40,9 @@
   - Debounce rapid changes (2-second window)
   - Write to temp file then rename for atomic updates
   - Handle SIGINT/SIGTERM for clean shutdown
+
+## Web UI Design Notes
+- The sliders and knobs in the web UI are read-only displays
+- They show the current levels set by the MIDI device
+- Users cannot adjust the levels directly from the web UI
+- The web UI is for visualizing current state and managing assignments only

@@ -204,7 +204,7 @@ func Run() {
 
 	// Create MIDI client
 	midiClients := make([]*midi.MidiClient, 0, 1)
-	midiClient := midi.NewMidiClient(paClient, midiDevice, rules)
+	midiClient := midi.NewMidiClient(paClient, midiDevice, rules, configManager)
 	midiClients = append(midiClients, midiClient)
 	go midiClient.Run()
 

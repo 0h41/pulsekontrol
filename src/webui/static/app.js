@@ -90,6 +90,26 @@ function handleServerMessage(data) {
                 appState.sliderAssignments = data.sliderAssignments;
                 appState.knobAssignments = data.knobAssignments;
             }
+            
+            // Update control values if provided
+            if (data.sliderValues) {
+                Object.keys(data.sliderValues).forEach(id => {
+                    const slider = appState.sliderControls.find(c => c.id === id);
+                    if (slider) {
+                        slider.value = data.sliderValues[id];
+                    }
+                });
+            }
+            
+            if (data.knobValues) {
+                Object.keys(data.knobValues).forEach(id => {
+                    const knob = appState.knobControls.find(c => c.id === id);
+                    if (knob) {
+                        knob.value = data.knobValues[id];
+                    }
+                });
+            }
+            
             updateAudioSources(data.sources);
             break;
             
@@ -115,24 +135,24 @@ const appState = {
     sliderAssignments: {}, // Control ID -> Array of Source IDs
     knobAssignments: {},   // Control ID -> Array of Source IDs
     sliderControls: [
-        { id: "slider1", name: "Slider 1", value: 50 },
-        { id: "slider2", name: "Slider 2", value: 50 },
-        { id: "slider3", name: "Slider 3", value: 50 },
-        { id: "slider4", name: "Slider 4", value: 50 },
-        { id: "slider5", name: "Slider 5", value: 50 },
-        { id: "slider6", name: "Slider 6", value: 50 },
-        { id: "slider7", name: "Slider 7", value: 50 },
-        { id: "slider8", name: "Slider 8", value: 50 },
+        { id: "slider1", value: 50 },
+        { id: "slider2", value: 50 },
+        { id: "slider3", value: 50 },
+        { id: "slider4", value: 50 },
+        { id: "slider5", value: 50 },
+        { id: "slider6", value: 50 },
+        { id: "slider7", value: 50 },
+        { id: "slider8", value: 50 },
     ],
     knobControls: [
-        { id: "knob1", name: "Knob 1", value: 50 },
-        { id: "knob2", name: "Knob 2", value: 50 },
-        { id: "knob3", name: "Knob 3", value: 50 },
-        { id: "knob4", name: "Knob 4", value: 50 },
-        { id: "knob5", name: "Knob 5", value: 50 },
-        { id: "knob6", name: "Knob 6", value: 50 },
-        { id: "knob7", name: "Knob 7", value: 50 },
-        { id: "knob8", name: "Knob 8", value: 50 },
+        { id: "knob1", value: 50 },
+        { id: "knob2", value: 50 },
+        { id: "knob3", value: 50 },
+        { id: "knob4", value: 50 },
+        { id: "knob5", value: 50 },
+        { id: "knob6", value: 50 },
+        { id: "knob7", value: 50 },
+        { id: "knob8", value: 50 },
     ]
 };
 
@@ -257,11 +277,12 @@ function renderControlWithSources(controlDiv, control, assignedSourceIds, availa
         renderKnobVisualization(controlDiv, control);
     }
     
-    // Add control name
-    const controlName = document.createElement('div');
-    controlName.textContent = control.name;
-    controlName.className = 'control-name';
-    controlDiv.appendChild(controlName);
+    // Add control number inline with visual
+    const controlVisual = controlDiv.querySelector('.control-visual');
+    const controlNumber = document.createElement('div');
+    controlNumber.textContent = control.id.replace('slider', '').replace('knob', '');
+    controlNumber.className = 'control-number';
+    controlVisual.insertBefore(controlNumber, controlVisual.firstChild);
     
     // Add sources list - also a drop zone
     const sourcesList = document.createElement('div');
@@ -376,6 +397,9 @@ function renderSliderVisualization(controlDiv, control) {
     valueLabel.className = 'value-label';
     valueLabel.textContent = control.value;
     
+    // NOTE: The sliders are read-only and show the levels set by the MIDI device
+    // We don't create range inputs since they should not be adjustable from the web GUI
+    
     // Assemble components
     progressTrack.appendChild(progressFill);
     controlVisual.appendChild(progressTrack);
@@ -383,6 +407,9 @@ function renderSliderVisualization(controlDiv, control) {
     
     controlDiv.appendChild(controlVisual);
 }
+
+// NOTE: We've removed the input handlers for the slider controls since they should be read-only 
+// and only controlled by the MIDI device
 
 // Use the same visualization for knobs
 function renderKnobVisualization(controlDiv, control) {
@@ -398,11 +425,12 @@ function renderEmptyControl(controlDiv, control) {
         renderKnobVisualization(controlDiv, control);
     }
     
-    // Add control name
-    const controlName = document.createElement('div');
-    controlName.textContent = control.name;
-    controlName.className = 'control-name';
-    controlDiv.appendChild(controlName);
+    // Add control number inline with visual
+    const controlVisual = controlDiv.querySelector('.control-visual');
+    const controlNumber = document.createElement('div');
+    controlNumber.textContent = control.id.replace('slider', '').replace('knob', '');
+    controlNumber.className = 'control-number';
+    controlVisual.insertBefore(controlNumber, controlVisual.firstChild);
     
     // Create content for empty control
     const placeholder = document.createElement('div');

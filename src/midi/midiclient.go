@@ -9,6 +9,8 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/samber/lo"
 	"gitlab.com/gomidi/midi/v2"
+	"regexp"
+	"strings"
 
 	driver "gitlab.com/gomidi/midi/v2/drivers/portmididrv"
 )
@@ -59,18 +61,20 @@ func List() {
 }
 
 type MidiClient struct {
-	log        zerolog.Logger
-	PAClient   *pulseaudio.PAClient
-	MidiDevice configuration.MidiDevice
-	Rules      []configuration.Rule
+	log           zerolog.Logger
+	PAClient      *pulseaudio.PAClient
+	MidiDevice    configuration.MidiDevice
+	Rules         []configuration.Rule
+	ConfigManager *configuration.ConfigManager
 }
 
-func NewMidiClient(paClient *pulseaudio.PAClient, device configuration.MidiDevice, rules []configuration.Rule) *MidiClient {
+func NewMidiClient(paClient *pulseaudio.PAClient, device configuration.MidiDevice, rules []configuration.Rule, configManager *configuration.ConfigManager) *MidiClient {
 	client := &MidiClient{
-		log:        log.With().Str("module", "Midi").Str("device", device.Name).Logger(),
-		PAClient:   paClient,
-		MidiDevice: device,
-		Rules:      rules,
+		log:           log.With().Str("module", "Midi").Str("device", device.Name).Logger(),
+		PAClient:      paClient,
+		MidiDevice:    device,
+		Rules:         rules,
+		ConfigManager: configManager,
 	}
 	return client
 }
@@ -177,6 +181,39 @@ func (client *MidiClient) Run() {
 						rule.MidiMessage.Channel == channel &&
 						rule.MidiMessage.Controller == controller
 				})
+				
+				// First, update config values for sliders and knobs
+				if client.ConfigManager != nil {
+					for _, rule := range rules {
+						// Convert 0-127 MIDI value to 0-100 percentage
+						value := int((float64(ccValue) / 127.0) * 100.0)
+						
+						// Determine whether this is a slider or knob based on the control path
+						if rule.MidiMessage.DeviceControlPath != "" {
+							groupRe := regexp.MustCompile("^Group([1-8])/(Slider|Knob)$")
+							if groupRe.MatchString(rule.MidiMessage.DeviceControlPath) {
+								matches := groupRe.FindStringSubmatch(rule.MidiMessage.DeviceControlPath)
+								groupNumber := matches[1]
+								controlType := matches[2]
+								
+								// Format: "slider1" or "knob1"
+								controlId := strings.ToLower(controlType) + groupNumber
+								controlTypeKey := strings.ToLower(controlType)
+								
+								// Update the control value in the configuration
+								client.log.Debug().
+									Str("controlId", controlId).
+									Str("controlType", controlTypeKey).
+									Int("value", value).
+									Msg("Updating control value from MIDI")
+								
+								client.ConfigManager.UpdateControlValue(controlTypeKey, controlId, value)
+							}
+						}
+					}
+				}
+				
+				// Then, perform actions as normal
 				for _, rule := range rules {
 					doActions(rule, ccValue)
 				}
