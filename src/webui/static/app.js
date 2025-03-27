@@ -420,7 +420,7 @@ function renderControlWithSources(controlDiv, control, assignedSourceIds, availa
         // Add missing indicator
         const missingIndicator = document.createElement('span');
         missingIndicator.className = 'missing-indicator';
-        missingIndicator.textContent = ' (not available)';
+        missingIndicator.textContent = ' X';
         sourceItem.appendChild(missingIndicator);
         
         sourcesList.appendChild(sourceItem);
