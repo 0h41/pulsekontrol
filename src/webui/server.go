@@ -339,7 +339,28 @@ func (s *WebUIServer) handleBroadcasts() {
 		case update := <-s.configUpdateCh:
 			// Handle config updates
 			log.Debug().Interface("update", update).Msg("Config updated, notifying clients")
-			// TODO: Convert update to JSON and broadcast it
+			
+			// If this is a control value update, broadcast it immediately
+			if updateMap, ok := update.(map[string]interface{}); ok {
+				if updateMap["type"] != nil && updateMap["id"] != nil && updateMap["value"] != nil {
+					// This is a control value update, broadcast it to clients
+					message := map[string]interface{}{
+						"type":        "controlValueUpdate",
+						"controlType": updateMap["type"],
+						"controlId":   updateMap["id"],
+						"value":       updateMap["value"],
+					}
+					
+					// Convert to JSON and broadcast
+					jsonData, err := json.Marshal(message)
+					if err != nil {
+						log.Error().Err(err).Msg("Failed to marshal control value update")
+						continue
+					}
+					
+					s.broadcast <- jsonData
+				}
+			}
 		case <-s.stopChan:
 			return
 		}
@@ -348,7 +369,7 @@ func (s *WebUIServer) handleBroadcasts() {
 
 // monitorAudioSources periodically fetches audio sources and broadcasts them to clients
 func (s *WebUIServer) monitorAudioSources() {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(200 * time.Millisecond) // Much faster polling (200ms)
 	defer ticker.Stop()
 
 	for {

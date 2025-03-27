@@ -84,6 +84,56 @@ function handleServerMessage(data) {
             updateMidiDeviceInfo(data.device);
             break;
             
+        case 'controlValueUpdate':
+            // Real-time update of an individual control value from MIDI
+            const controlType = data.controlType;
+            const controlId = data.controlId;
+            const value = data.value;
+            
+            // Update the control value in our state
+            if (controlType === 'slider') {
+                const slider = appState.sliderControls.find(c => c.id === controlId);
+                if (slider) {
+                    slider.value = value;
+                    
+                    // Update the visual UI immediately without re-rendering everything
+                    const controlDiv = document.getElementById(controlId);
+                    if (controlDiv) {
+                        const progressFill = controlDiv.querySelector('.progress-fill');
+                        const valueLabel = controlDiv.querySelector('.value-label');
+                        
+                        if (progressFill) {
+                            progressFill.style.width = `${value}%`;
+                        }
+                        
+                        if (valueLabel) {
+                            valueLabel.textContent = value;
+                        }
+                    }
+                }
+            } else if (controlType === 'knob') {
+                const knob = appState.knobControls.find(c => c.id === controlId);
+                if (knob) {
+                    knob.value = value;
+                    
+                    // Update the visual UI immediately without re-rendering everything
+                    const controlDiv = document.getElementById(controlId);
+                    if (controlDiv) {
+                        const progressFill = controlDiv.querySelector('.progress-fill');
+                        const valueLabel = controlDiv.querySelector('.value-label');
+                        
+                        if (progressFill) {
+                            progressFill.style.width = `${value}%`;
+                        }
+                        
+                        if (valueLabel) {
+                            valueLabel.textContent = value;
+                        }
+                    }
+                }
+            }
+            break;
+            
         case 'audioSourcesUpdate':
             // Update both sources and assignments if provided
             if (data.sliderAssignments && data.knobAssignments) {

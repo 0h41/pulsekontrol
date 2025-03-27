@@ -1,6 +1,7 @@
 package midi
 
 import (
+	"fmt"
 	"github.com/0h41/pulsekontrol/src/configuration"
 	akaiLpd8 "github.com/0h41/pulsekontrol/src/device/akai/lpd8"
 	korgNanokontrol2 "github.com/0h41/pulsekontrol/src/device/korg/nanokontrol2"
@@ -184,12 +185,17 @@ func (client *MidiClient) Run() {
 				
 				// First, update config values for sliders and knobs
 				if client.ConfigManager != nil {
-					for _, rule := range rules {
-						// Convert 0-127 MIDI value to 0-100 percentage
-						value := int((float64(ccValue) / 127.0) * 100.0)
-						
-						// Determine whether this is a slider or knob based on the control path
-						if rule.MidiMessage.DeviceControlPath != "" {
+					// Convert 0-127 MIDI value to 0-100 percentage
+					value := int((float64(ccValue) / 127.0) * 100.0)
+					
+					// First try to find a matching rule for this MIDI message
+					var controlFound bool
+					for _, rule := range client.Rules {
+						if rule.MidiMessage.Type == configuration.ControlChange &&
+							rule.MidiMessage.Channel == channel &&
+							rule.MidiMessage.Controller == controller &&
+							rule.MidiMessage.DeviceControlPath != "" {
+							
 							groupRe := regexp.MustCompile("^Group([1-8])/(Slider|Knob)$")
 							if groupRe.MatchString(rule.MidiMessage.DeviceControlPath) {
 								matches := groupRe.FindStringSubmatch(rule.MidiMessage.DeviceControlPath)
@@ -205,10 +211,47 @@ func (client *MidiClient) Run() {
 									Str("controlId", controlId).
 									Str("controlType", controlTypeKey).
 									Int("value", value).
-									Msg("Updating control value from MIDI")
+									Msg("Updating control value from MIDI via rule")
 								
+								// Update immediately for real-time response
 								client.ConfigManager.UpdateControlValue(controlTypeKey, controlId, value)
+								controlFound = true
+								break
 							}
+						}
+					}
+					
+					// If no rule found, try a different approach for the nanoKONTROL2
+					// Directly map controller numbers to slider/knobs based on device specifications
+					if !controlFound && client.MidiDevice.Type == configuration.KorgNanoKontrol2 {
+						// Standard mapping for nanoKONTROL2 in default mode
+						// For sliders: controllers 0-7 correspond to sliders 1-8
+						// For knobs: controllers 16-23 correspond to knobs 1-8
+						
+						if controller >= 0 && controller <= 7 {
+							// This is a slider (0-7 → slider1-8)
+							groupNumber := controller + 1
+							controlId := fmt.Sprintf("slider%d", groupNumber)
+							
+							client.log.Debug().
+								Str("controlId", controlId).
+								Str("controlType", "slider").
+								Int("value", value).
+								Msg("Updating slider value from MIDI via direct mapping")
+							
+							client.ConfigManager.UpdateControlValue("slider", controlId, value)
+						} else if controller >= 16 && controller <= 23 {
+							// This is a knob (16-23 → knob1-8)
+							groupNumber := controller - 16 + 1
+							controlId := fmt.Sprintf("knob%d", groupNumber)
+							
+							client.log.Debug().
+								Str("controlId", controlId).
+								Str("controlType", "knob").
+								Int("value", value).
+								Msg("Updating knob value from MIDI via direct mapping")
+							
+							client.ConfigManager.UpdateControlValue("knob", controlId, value)
 						}
 					}
 				}

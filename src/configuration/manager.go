@@ -1,7 +1,9 @@
 package configuration
 
 import (
+	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -102,22 +104,40 @@ func (cm *ConfigManager) UpdateControlValue(controlType string, controlId string
 		if slider, ok := cm.config.Controls.Sliders[controlId]; ok {
 			slider.Value = value
 			cm.config.Controls.Sliders[controlId] = slider
+		} else {
+			// Create the slider if it doesn't exist (when no sources are assigned)
+			groupNumber := strings.TrimPrefix(controlId, "slider")
+			newSlider := SliderConfig{
+				Path:    fmt.Sprintf("Group%s/Slider", groupNumber),
+				Value:   value,
+				Sources: []Source{},
+			}
+			cm.config.Controls.Sliders[controlId] = newSlider
 		}
 	case "knob":
 		if knob, ok := cm.config.Controls.Knobs[controlId]; ok {
 			knob.Value = value
 			cm.config.Controls.Knobs[controlId] = knob
+		} else {
+			// Create the knob if it doesn't exist (when no sources are assigned)
+			groupNumber := strings.TrimPrefix(controlId, "knob")
+			newKnob := KnobConfig{
+				Path:    fmt.Sprintf("Group%s/Knob", groupNumber),
+				Value:   value,
+				Sources: []Source{},
+			}
+			cm.config.Controls.Knobs[controlId] = newKnob
 		}
 	}
 
-	// Notify subscribers
+	// Notify subscribers immediately with real-time changes
 	cm.Notify("control.value.updated", map[string]interface{}{
 		"type":  controlType,
 		"id":    controlId,
 		"value": value,
 	})
 
-	// Schedule save
+	// Schedule save - but don't let this slow down the UI updates
 	cm.SaveWithDebounce()
 }
 
