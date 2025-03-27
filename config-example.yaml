@@ -6,25 +6,23 @@ controls:
     sliders:
         slider1:
             path: Group1/Slider
-            value: 43
-            sources:
-                - type: PlaybackStream
-                  name: Chromium
+            value: 53
+            sources: []
         slider2:
             path: Group2/Slider
-            value: 56
+            value: 63
             sources: []
         slider3:
             path: Group3/Slider
-            value: 43
+            value: 57
             sources: []
         slider4:
             path: Group4/Slider
-            value: 53
+            value: 65
             sources: []
         slider5:
             path: Group5/Slider
-            value: 65
+            value: 48
             sources: []
         slider6:
             path: Group6/Slider
@@ -45,7 +43,7 @@ controls:
             sources: []
         knob2:
             path: Group2/Knob
-            value: 48
+            value: 55
             sources: []
         knob3:
             path: Group3/Knob
@@ -69,28 +67,6 @@ controls:
             sources: []
         knob8:
             path: Group8/Knob
-            value: 77
-            sources:
-                - type: OutputDevice
-                  name: FiiO USB DAC-E10 Analog Stereo
-    buttons:
-        mute1:
-            path: Group1/Mute
-            action: ToggleMute
-            target:
-                name: ""
-        mute3:
-            path: Group3/Mute
-            action: ToggleMute
-            target:
-                name: ""
-        mute4:
-            path: Group4/Mute
-            action: ToggleMute
-            target:
-                name: ""
-        mute8:
-            path: Group8/Mute
-            action: ToggleMute
-            target:
-                name: ""
+            value: 58
+            sources: []
+
