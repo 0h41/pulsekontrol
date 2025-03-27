@@ -75,6 +75,86 @@ func (s *WebUIServer) Start() error {
 	return server.ListenAndServe()
 }
 
+// buildUIStateMessage creates a message with current UI state
+func (s *WebUIServer) buildUIStateMessage() ([]byte, error) {
+	// Get audio sources
+	sources := s.paClient.GetAudioSources()
+	
+	// Get control assignments
+	config := s.configManager.GetConfig()
+	
+	// Map of slider assignments (controlId -> sourceIds)
+	sliderAssignments := make(map[string][]string)
+	sliderValues := make(map[string]int)
+	for id, slider := range config.Controls.Sliders {
+		sourceIds := []string{}
+		// For each source in the slider, find the matching audio source
+		for _, source := range slider.Sources {
+			found := false
+			// Find the source in our audio sources
+			for _, audioSource := range sources {
+				// Use lowercase comparison for source types
+				sourceTypeLower := strings.ToLower(string(source.Type))
+				audioSourceTypeLower := strings.ToLower(audioSource.Type)
+				if audioSourceTypeLower == sourceTypeLower && audioSource.Name == source.Name {
+					sourceIds = append(sourceIds, audioSource.ID)
+					found = true
+					break
+				}
+			}
+			// If source not found in current sources, create a virtual ID for it
+			if !found {
+				virtualId := fmt.Sprintf("%s:%s", source.Type, source.Name)
+				sourceIds = append(sourceIds, virtualId)
+			}
+		}
+		sliderAssignments[id] = sourceIds
+		sliderValues[id] = slider.Value
+	}
+	
+	// Map of knob assignments (controlId -> sourceIds)
+	knobAssignments := make(map[string][]string)
+	knobValues := make(map[string]int)
+	for id, knob := range config.Controls.Knobs {
+		sourceIds := []string{}
+		// For each source in the knob, find the matching audio source
+		for _, source := range knob.Sources {
+			found := false
+			// Find the source in our audio sources
+			for _, audioSource := range sources {
+				// Use lowercase comparison for source types
+				sourceTypeLower := strings.ToLower(string(source.Type))
+				audioSourceTypeLower := strings.ToLower(audioSource.Type)
+				if audioSourceTypeLower == sourceTypeLower && audioSource.Name == source.Name {
+					sourceIds = append(sourceIds, audioSource.ID)
+					found = true
+					break
+				}
+			}
+			// If source not found in current sources, create a virtual ID for it
+			if !found {
+				virtualId := fmt.Sprintf("%s:%s", source.Type, source.Name)
+				sourceIds = append(sourceIds, virtualId)
+			}
+		}
+		knobAssignments[id] = sourceIds
+		knobValues[id] = knob.Value
+	}
+	
+	// Create message with sources and control mappings
+	message := map[string]interface{}{
+		"type":              "audioSourcesUpdate",
+		"sources":           sources,
+		"sliderAssignments": sliderAssignments,
+		"sliderValues":      sliderValues,
+		"knobAssignments":   knobAssignments,
+		"knobValues":        knobValues,
+	}
+	
+	// Convert to JSON
+	return json.Marshal(message)
+}
+
 func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Upgrade HTTP connection to WebSocket
 	conn, err := s.upgrader.Upgrade(w, r, nil)
@@ -125,9 +205,21 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		
 		switch msgType {
 		case "getState":
-			// Client is requesting initial state
-			// Currently handled by monitorAudioSources periodic updates
+			// Client is requesting initial state - send it immediately rather than waiting for next poll
+			jsonData, err := s.buildUIStateMessage()
+			if err != nil {
+				log.Error().Err(err).Msg("Failed to marshal audio sources and assignments")
+				continue
+			}
 			
+			// Send directly to this client
+			log.Debug().Msg("Sending initial state to new client")
+			err = conn.WriteMessage(websocket.TextMessage, jsonData)
+			if err != nil {
+				log.Error().Err(err).Msg("Failed to send initial state to client")
+				delete(s.clients, conn)
+				return
+			}
 		case "setVolume":
 			// Client wants to change volume
 			sourceId, ok := clientMsg["sourceId"].(string)
@@ -462,91 +554,33 @@ func (s *WebUIServer) monitorAudioSources() {
 	ticker := time.NewTicker(200 * time.Millisecond) // Poll at 200ms for responsive UI updates
 	defer ticker.Stop()
 
+	// Store previous state as a hash of the JSON message
+	var prevStateHash string
+
 	for {
 		select {
 		case <-ticker.C:
-			// Get audio sources
-			sources := s.paClient.GetAudioSources()
-			
-			// Get control assignments
-			config := s.configManager.GetConfig()
-			
-			// Map of slider assignments (controlId -> sourceIds)
-			sliderAssignments := make(map[string][]string)
-			sliderValues := make(map[string]int)
-			for id, slider := range config.Controls.Sliders {
-				sourceIds := []string{}
-				// For each source in the slider, find the matching audio source
-				for _, source := range slider.Sources {
-					found := false
-					// Find the source in our audio sources
-					for _, audioSource := range sources {
-						// Use lowercase comparison for source types
-						sourceTypeLower := strings.ToLower(string(source.Type))
-						audioSourceTypeLower := strings.ToLower(audioSource.Type)
-						if audioSourceTypeLower == sourceTypeLower && audioSource.Name == source.Name {
-							sourceIds = append(sourceIds, audioSource.ID)
-							found = true
-							break
-						}
-					}
-					// If source not found in current sources, create a virtual ID for it
-					if !found {
-						virtualId := fmt.Sprintf("%s:%s", source.Type, source.Name)
-						sourceIds = append(sourceIds, virtualId)
-					}
-				}
-				sliderAssignments[id] = sourceIds
-				sliderValues[id] = slider.Value
-			}
-			
-			// Map of knob assignments (controlId -> sourceIds)
-			knobAssignments := make(map[string][]string)
-			knobValues := make(map[string]int)
-			for id, knob := range config.Controls.Knobs {
-				sourceIds := []string{}
-				// For each source in the knob, find the matching audio source
-				for _, source := range knob.Sources {
-					found := false
-					// Find the source in our audio sources
-					for _, audioSource := range sources {
-						// Use lowercase comparison for source types
-						sourceTypeLower := strings.ToLower(string(source.Type))
-						audioSourceTypeLower := strings.ToLower(audioSource.Type)
-						if audioSourceTypeLower == sourceTypeLower && audioSource.Name == source.Name {
-							sourceIds = append(sourceIds, audioSource.ID)
-							found = true
-							break
-						}
-					}
-					// If source not found in current sources, create a virtual ID for it
-					if !found {
-						virtualId := fmt.Sprintf("%s:%s", source.Type, source.Name)
-						sourceIds = append(sourceIds, virtualId)
-					}
-				}
-				knobAssignments[id] = sourceIds
-				knobValues[id] = knob.Value
-			}
-			
-			// Create message with sources and control mappings
-			message := map[string]interface{}{
-				"type":              "audioSourcesUpdate",
-				"sources":           sources,
-				"sliderAssignments": sliderAssignments,
-				"sliderValues":      sliderValues,
-				"knobAssignments":   knobAssignments,
-				"knobValues":        knobValues,
-			}
-			
-			// Convert to JSON
-			jsonData, err := json.Marshal(message)
+			// Get current UI state message
+			jsonData, err := s.buildUIStateMessage()
 			if err != nil {
 				log.Error().Err(err).Msg("Failed to marshal audio sources and assignments")
 				continue
 			}
+
+			// Calculate hash of the current state
+			currentStateHash := fmt.Sprintf("%x", jsonData)
+			
+			// Check if anything has changed
+			if prevStateHash == currentStateHash {
+				// Nothing changed, skip the update
+				continue
+			}
+			
+			// Update previous state hash
+			prevStateHash = currentStateHash
 			
 			// Broadcast to clients
+			log.Debug().Msg("State changed, sending update to clients")
 			s.broadcast <- jsonData
 		case <-s.stopChan:
 			return
