@@ -35,16 +35,7 @@ header {
     gap: 15px;
 }
 
-.midi-info {
-    display: flex;
-    flex-direction: column;
-    font-size: 13px;
-    color: #555;
-}
-
-.midi-info span {
-    margin-bottom: 3px;
-}
+/* MIDI info section removed */
 
 h1 {
     color: #333;
@@ -114,8 +105,9 @@ main {
 }
 
 #sources-container.drop-target {
-    background-color: #e8f5e9;
-    border: 2px dashed #4caf50;
+    background-color: #e8f5e9 !important;
+    border: 2px dashed #4caf50 !important;
+    transition: all 0.2s ease;
 }
 
 .control-container h3 {
@@ -161,6 +153,11 @@ main {
     flex-direction: column;
     gap: 8px;
     overflow-y: auto;
+}
+
+.sources-drop-zone {
+    position: relative;
+    border: 1px solid rgba(0,0,0,0.1);
 }
 
 .mixer-channel {
@@ -320,8 +317,15 @@ main {
 }
 
 .drop-target {
-    background-color: #e6f7ff;
-    border: 2px dashed #1890ff;
+    background-color: #e6f7ff !important;
+    border: 2px dashed #1890ff !important;
+    transition: all 0.2s ease;
+}
+
+.drop-success {
+    background-color: #f0f9eb !important;
+    border: 2px solid #67c23a !important;
+    transition: all 0.2s ease;
 }
 
 .control-placeholder {

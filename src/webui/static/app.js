@@ -1,7 +1,5 @@
 // DOM Elements
 const connectionStatus = document.getElementById('connection-status');
-const midiStatus = document.getElementById('midi-status');
-const midiModel = document.getElementById('midi-model');
 const slidersContainer = document.getElementById('sliders-container');
 const knobsContainer = document.getElementById('knobs-container');
 const sourcesContainer = document.getElementById('sources-container');
@@ -80,9 +78,7 @@ function handleServerMessage(data) {
             sendMessage({ type: 'getState' });
             break;
             
-        case 'midiDeviceUpdate':
-            updateMidiDeviceInfo(data.device);
-            break;
+        // MIDI device update case removed
             
         case 'controlValueUpdate':
             // Real-time update of an individual control value from MIDI
@@ -168,16 +164,7 @@ function handleServerMessage(data) {
     }
 }
 
-// Update MIDI device information display
-function updateMidiDeviceInfo(device) {
-    if (device && device.connected) {
-        midiStatus.textContent = 'Connected';
-        midiModel.textContent = device.name || 'Unknown';
-    } else {
-        midiStatus.textContent = 'Not detected';
-        midiModel.textContent = '-';
-    }
-}
+// MIDI device information display removed
 
 // Application state
 const appState = {
@@ -284,9 +271,18 @@ function updateAudioSources(sources) {
         source => !allAssignedIds.includes(source.id)
     );
     
+    // Clear the sources container first
+    sourcesContainer.innerHTML = '';
+    
+    // Make sure the sources container has a direct drop zone handler
+    sourcesContainer.setAttribute('data-is-sources-container', 'true');
+    
     // Render unassigned audio sources
     if (unassignedSources.length === 0) {
-        sourcesContainer.innerHTML = '<div class="control-placeholder">No unassigned sources available</div>';
+        const placeholder = document.createElement('div');
+        placeholder.className = 'control-placeholder';
+        placeholder.textContent = 'No unassigned sources available';
+        sourcesContainer.appendChild(placeholder);
     } else {
         unassignedSources.forEach(source => {
             const sourceDiv = document.createElement('div');
@@ -539,10 +535,20 @@ function setupDropZones() {
     });
     
     // Make sources container a drop zone for unassigning
+    // First remove any existing event listeners to prevent duplicates
+    sourcesContainer.removeEventListener('dragover', handleDragOver);
+    sourcesContainer.removeEventListener('dragenter', handleDragEnter);
+    sourcesContainer.removeEventListener('dragleave', handleDragLeave);
+    sourcesContainer.removeEventListener('drop', handleSourcesDrop);
+    
+    // Now add them back
     sourcesContainer.addEventListener('dragover', handleDragOver);
     sourcesContainer.addEventListener('dragenter', handleDragEnter);
     sourcesContainer.addEventListener('dragleave', handleDragLeave);
     sourcesContainer.addEventListener('drop', handleSourcesDrop);
+    
+    // Add a specific class to distinguish from other containers
+    sourcesContainer.classList.add('sources-drop-zone');
 }
 
 function handleDragOver(e) {
@@ -551,11 +557,24 @@ function handleDragOver(e) {
 }
 
 function handleDragEnter(e) {
+    // Prevent bubbling of dragenter event
+    e.preventDefault();
+    e.stopPropagation();
     this.classList.add('drop-target');
 }
 
 function handleDragLeave(e) {
-    this.classList.remove('drop-target');
+    // Check if the mouse is leaving to a child element
+    const rect = this.getBoundingClientRect();
+    const isLeaving = 
+        e.clientX < rect.left ||
+        e.clientX >= rect.right ||
+        e.clientY < rect.top ||
+        e.clientY >= rect.bottom;
+    
+    if (isLeaving) {
+        this.classList.remove('drop-target');
+    }
 }
 
 function handleDrop(e) {
@@ -587,9 +606,12 @@ function handleDrop(e) {
 
 function handleSourcesDrop(e) {
     e.preventDefault();
+    e.stopPropagation(); // Prevent event bubbling
     
     // Remove drop target highlighting
-    this.classList.remove('drop-target');
+    document.querySelectorAll('.drop-target').forEach(item => {
+        item.classList.remove('drop-target');
+    });
     
     if (!draggedItem) return;
     
@@ -602,6 +624,12 @@ function handleSourcesDrop(e) {
     if (oldParentControl && oldParentType) {
         // Remove from old control
         unassignSource(oldParentControl, sourceId, oldParentType);
+        
+        // Indicate success visually
+        sourcesContainer.classList.add('drop-success');
+        setTimeout(() => {
+            sourcesContainer.classList.remove('drop-success');
+        }, 500);
     }
     
     return false;
