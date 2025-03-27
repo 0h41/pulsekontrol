@@ -78,6 +78,54 @@ func NewMidiClient(paClient *pulseaudio.PAClient, device configuration.MidiDevic
 	return client
 }
 
+// UpdateRules updates the rules for the MIDI client dynamically
+func (client *MidiClient) UpdateRules(rules []configuration.Rule) {
+	client.log.Info().Msgf("Updating MIDI rules - previous: %d, new: %d", len(client.Rules), len(rules))
+	
+	// Log the old rules for comparison
+	for i, rule := range client.Rules {
+		if rule.MidiMessage.DeviceControlPath != "" {
+			client.log.Debug().Msgf("OLD rule[%d]: path=%s, actions=%d", 
+				i, rule.MidiMessage.DeviceControlPath, len(rule.Actions))
+			
+			// Also log controller number which is critical for matching
+			client.log.Debug().Msgf("  Controller=%d, Channel=%d", 
+				rule.MidiMessage.Controller, rule.MidiMessage.Channel)
+			
+			for j, action := range rule.Actions {
+				if target, ok := action.Target.(*configuration.TypedTarget); ok {
+					client.log.Debug().Msgf("  OLD action[%d]: type=%s, target=%s:%s", 
+						j, action.Type, target.Type, target.Name)
+				}
+			}
+		}
+	}
+	
+	// Log the new rules
+	for i, rule := range rules {
+		if rule.MidiMessage.DeviceControlPath != "" {
+			client.log.Debug().Msgf("NEW rule[%d]: path=%s, actions=%d", 
+				i, rule.MidiMessage.DeviceControlPath, len(rule.Actions))
+			
+			// Also log controller number which is critical for matching
+			client.log.Debug().Msgf("  Controller=%d, Channel=%d", 
+				rule.MidiMessage.Controller, rule.MidiMessage.Channel)
+			
+			for j, action := range rule.Actions {
+				if target, ok := action.Target.(*configuration.TypedTarget); ok {
+					client.log.Debug().Msgf("  NEW action[%d]: type=%s, target=%s:%s", 
+						j, action.Type, target.Type, target.Name)
+				}
+			}
+		}
+	}
+	
+	// Just assign the new rules directly without device-specific updates
+	// since they require hardware communication
+	client.Rules = rules
+	client.log.Info().Msg("Updated rules without requerying device")
+}
+
 func (client *MidiClient) Run() {
 	drv, err := driver.New()
 	if err != nil {
@@ -116,6 +164,7 @@ func (client *MidiClient) Run() {
 
 	onMessage := func(sysExChannel chan []byte) func(msg midi.Message, timestampMs int32) {
 		var doActions = func(rule configuration.Rule, value uint8) {
+			client.log.Debug().Msgf("Executing actions for rule: %s", rule.MidiMessage.DeviceControlPath)
 			for _, action := range rule.Actions {
 				switch action.Type {
 				case configuration.SetVolume:
@@ -132,6 +181,16 @@ func (client *MidiClient) Run() {
 						maxValue = 0x7f
 					}
 					volumePercent := float32(value) / float32(maxValue-minValue)
+					
+					// Better logging of volume change
+					if target, ok := action.Target.(*configuration.TypedTarget); ok {
+						client.log.Debug().
+							Str("target", target.Name).
+							Str("type", string(target.Type)).
+							Float32("volume", volumePercent).
+							Msg("Setting volume")
+					}
+					
 					if err := client.PAClient.ProcessVolumeAction(action, volumePercent); err != nil {
 						client.log.Error().Err(err)
 					}
@@ -162,11 +221,24 @@ func (client *MidiClient) Run() {
 				var note uint8
 				var velocity uint8
 				message.GetNoteOn(&channel, &note, &velocity)
+				
+				client.log.Debug().Msgf("Note message: channel=%d, note=%d, velocity=%d", 
+					channel, note, velocity)
+				
 				rules := lo.Filter(client.Rules, func(rule configuration.Rule, i int) bool {
-					return rule.MidiMessage.Type == configuration.Note &&
+					match := rule.MidiMessage.Type == configuration.Note &&
 						rule.MidiMessage.Channel == channel &&
 						rule.MidiMessage.Note == note
+						
+					if match {
+						client.log.Debug().Msgf("MATCHED note rule: %s", rule.MidiMessage.DeviceControlPath)
+					}
+					
+					return match
 				})
+				
+				client.log.Debug().Msgf("Found %d matching note rules", len(rules))
+				
 				for _, rule := range rules {
 					doActions(rule, velocity)
 				}
@@ -175,11 +247,44 @@ func (client *MidiClient) Run() {
 				var controller uint8
 				var ccValue uint8
 				message.GetControlChange(&channel, &controller, &ccValue)
+				
+				// Log more details about the MIDI message
+				client.log.Debug().Msgf("CC message: channel=%d, controller=%d, value=%d", 
+					channel, controller, ccValue)
+				
+				// Show all rules for debugging
+				client.log.Debug().Msgf("Looking for matching rules among %d rules", len(client.Rules))
+				
 				rules := lo.Filter(client.Rules, func(rule configuration.Rule, i int) bool {
-					return rule.MidiMessage.Type == configuration.ControlChange &&
+					match := rule.MidiMessage.Type == configuration.ControlChange &&
 						rule.MidiMessage.Channel == channel &&
 						rule.MidiMessage.Controller == controller
+					
+					// Additional detailed logging
+					if rule.MidiMessage.DeviceControlPath != "" {
+						if match {
+							client.log.Debug().
+								Str("path", rule.MidiMessage.DeviceControlPath).
+								Uint8("rule_controller", rule.MidiMessage.Controller).
+								Uint8("msg_controller", controller).
+								Uint8("rule_channel", rule.MidiMessage.Channel).
+								Uint8("msg_channel", channel).
+								Msg("MATCHED CC rule")
+						} else if controller < 100 { // Only log for relevant controllers to reduce noise
+							client.log.Debug().
+								Str("path", rule.MidiMessage.DeviceControlPath).
+								Uint8("rule_controller", rule.MidiMessage.Controller).
+								Uint8("msg_controller", controller).
+								Uint8("rule_channel", rule.MidiMessage.Channel).
+								Uint8("msg_channel", channel).
+								Msg("Rule did NOT match")
+						}
+					}
+					
+					return match
 				})
+				
+				client.log.Debug().Msgf("Found %d matching CC rules", len(rules))
 				
 				// First, update config values for sliders and knobs
 				if client.ConfigManager != nil {

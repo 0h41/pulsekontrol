@@ -105,15 +105,96 @@ func Run() {
 	}
 	
 	// Create rules from control assignments
+	rules := createRulesFromConfig(config, midiDevice)
+
+	// Create MIDI client
+	midiClients := make([]*midi.MidiClient, 0, 1)
+	midiClient := midi.NewMidiClient(paClient, midiDevice, rules, configManager)
+	midiClients = append(midiClients, midiClient)
+	
+	// Subscribe to configuration changes to update rules dynamically
+	configManager.Subscribe("source.assigned", func(data interface{}) {
+		// Regenerate rules when sources are assigned
+		log.Info().Msg("Source assigned, updating MIDI rules")
+		
+		// Recreate rules from current configuration - get the latest config!
+		currentConfig := configManager.GetConfig()
+		newRules := createRulesFromConfig(*currentConfig, midiDevice)
+		
+		// Update the MIDI client with the new rules
+		midiClient.UpdateRules(newRules)
+	})
+	
+	configManager.Subscribe("source.unassigned", func(data interface{}) {
+		// Regenerate rules when sources are unassigned
+		log.Info().Msg("Source unassigned, updating MIDI rules")
+		
+		// Recreate rules from current configuration - get the latest config!
+		currentConfig := configManager.GetConfig()
+		newRules := createRulesFromConfig(*currentConfig, midiDevice)
+		
+		// Update the MIDI client with the new rules
+		midiClient.UpdateRules(newRules)
+	})
+	
+	go midiClient.Run()
+
+	// Set up signal handling for graceful shutdown
+	setupSignalHandling()
+
+	// Wait for program to exit
+	select {}
+}
+
+func setupSignalHandling() {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	
+	go func() {
+		sig := <-sigChan
+		log.Info().Msgf("Received signal %s, shutting down...", sig)
+		// TODO: Add cleanup logic here
+		os.Exit(0)
+	}()
+}
+
+// Helper to extract a group number from a control path
+func extractGroupNumber(path string) (int, error) {
+	var groupNumber int
+	
+	// Try to parse "GroupX/..." format
+	_, err := fmt.Sscanf(path, "Group%d/", &groupNumber)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse group number from path %s: %w", path, err)
+	}
+	
+	return groupNumber, nil
+}
+
+// createRulesFromConfig generates MIDI rules from the current configuration
+func createRulesFromConfig(config configuration.Config, midiDevice configuration.MidiDevice) []configuration.Rule {
 	var rules []configuration.Rule
 	
 	// Add slider rules
 	for _, slider := range config.Controls.Sliders {
 		if len(slider.Sources) > 0 {
+			// Parse the slider path to get the group number
+			groupNumber, err := extractGroupNumber(slider.Path)
+			if err != nil {
+				log.Error().Err(err).Str("path", slider.Path).Msg("Failed to parse slider path")
+				continue
+			}
+			
+			// For nanoKONTROL2, slider controllers are 0-7 for groups 1-8
+			controller := uint8(groupNumber - 1)
+			
 			rule := configuration.Rule{
 				MidiMessage: configuration.MidiMessage{
 					DeviceName:        midiDevice.Name,
 					DeviceControlPath: slider.Path,
+					Type:              configuration.ControlChange,
+					Channel:           0, // Default channel
+					Controller:        controller,
 				},
 				Actions: []configuration.Action{},
 			}
@@ -148,17 +229,32 @@ func Run() {
 			}
 			
 			rules = append(rules, rule)
-			log.Debug().Msgf("Added rule for slider path %s with %d sources", slider.Path, len(slider.Sources))
+			log.Debug().
+				Msgf("Added rule for slider path %s with %d sources (controller=%d)", 
+					slider.Path, len(slider.Sources), controller)
 		}
 	}
 	
 	// Add knob rules
 	for _, knob := range config.Controls.Knobs {
 		if len(knob.Sources) > 0 {
+			// Parse the knob path to get the group number
+			groupNumber, err := extractGroupNumber(knob.Path)
+			if err != nil {
+				log.Error().Err(err).Str("path", knob.Path).Msg("Failed to parse knob path")
+				continue
+			}
+			
+			// For nanoKONTROL2, knob controllers are 16-23 for groups 1-8
+			controller := uint8(16 + groupNumber - 1)
+			
 			rule := configuration.Rule{
 				MidiMessage: configuration.MidiMessage{
 					DeviceName:        midiDevice.Name,
 					DeviceControlPath: knob.Path,
+					Type:              configuration.ControlChange,
+					Channel:           0, // Default channel
+					Controller:        controller,
 				},
 				Actions: []configuration.Action{},
 			}
@@ -193,11 +289,13 @@ func Run() {
 			}
 			
 			rules = append(rules, rule)
-			log.Debug().Msgf("Added rule for knob path %s with %d sources", knob.Path, len(knob.Sources))
+			log.Debug().
+				Msgf("Added rule for knob path %s with %d sources (controller=%d)", 
+					knob.Path, len(knob.Sources), controller)
 		}
 	}
 	
-	// Add button rules
+	// Add button rules (not doing direct controller mapping for buttons since they're more complex)
 	for _, button := range config.Controls.Buttons {
 		rule := configuration.Rule{
 			MidiMessage: configuration.MidiMessage{
@@ -240,28 +338,6 @@ func Run() {
 		rules = append(rules, rule)
 		log.Debug().Msgf("Added rule for button path %s with action %s", button.Path, button.Action)
 	}
-
-	// Create MIDI client
-	midiClients := make([]*midi.MidiClient, 0, 1)
-	midiClient := midi.NewMidiClient(paClient, midiDevice, rules, configManager)
-	midiClients = append(midiClients, midiClient)
-	go midiClient.Run()
-
-	// Set up signal handling for graceful shutdown
-	setupSignalHandling()
-
-	// Wait for program to exit
-	select {}
-}
-
-func setupSignalHandling() {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	
-	go func() {
-		sig := <-sigChan
-		log.Info().Msgf("Received signal %s, shutting down...", sig)
-		// TODO: Add cleanup logic here
-		os.Exit(0)
-	}()
+	return rules
 }
