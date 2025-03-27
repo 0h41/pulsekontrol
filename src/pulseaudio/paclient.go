@@ -17,10 +17,10 @@ type Stream struct {
 }
 
 type AudioSource struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	Volume   int    `json:"volume"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Volume int    `json:"volume"`
 }
 
 type PAClient struct {
@@ -51,66 +51,66 @@ func NewPAClient() *PAClient {
 // GetAudioSources returns all audio sources in a format suitable for the UI
 func (client *PAClient) GetAudioSources() []AudioSource {
 	client.refreshStreams()
-	
+
 	// Collect all sources
 	sources := []AudioSource{}
-	
+
 	// Add outputs (sinks)
 	lo.ForEach(client.outputs, func(stream Stream, i int) {
 		// Default volume
 		volume := 75
-		
+
 		// We use estimated values since we can't directly access the volume properties
 		// In a real implementation, we would need to query the actual volume
 		// using the pulseaudio library's methods
-		
+
 		sources = append(sources, AudioSource{
-			ID:       stream.fullName,
-			Name:     stream.name,
-			Type:     "output",
-			Volume:   volume,
+			ID:     stream.fullName,
+			Name:   stream.name,
+			Type:   "OutputDevice",
+			Volume: volume,
 		})
 	})
-	
+
 	// Add inputs (sources)
 	lo.ForEach(client.inputs, func(stream Stream, i int) {
 		// Default volume
 		volume := 75
-		
+
 		sources = append(sources, AudioSource{
-			ID:       stream.fullName,
-			Name:     stream.name,
-			Type:     "input",
-			Volume:   volume,
+			ID:     stream.fullName,
+			Name:   stream.name,
+			Type:   "InputDevice",
+			Volume: volume,
 		})
 	})
-	
+
 	// Add playback streams (sink inputs)
 	lo.ForEach(client.playbackStreams, func(stream Stream, i int) {
 		// Default volume
 		volume := 75
-		
+
 		sources = append(sources, AudioSource{
-			ID:       stream.fullName,
-			Name:     stream.name,
-			Type:     "playback",
-			Volume:   volume,
+			ID:     stream.fullName,
+			Name:   stream.name,
+			Type:   "PlaybackStream",
+			Volume: volume,
 		})
 	})
-	
+
 	// Add record streams (source outputs)
 	lo.ForEach(client.recordStreams, func(stream Stream, i int) {
 		// Default volume
 		volume := 75
-		
+
 		sources = append(sources, AudioSource{
-			ID:       stream.fullName,
-			Name:     stream.name,
-			Type:     "record",
-			Volume:   volume,
+			ID:     stream.fullName,
+			Name:   stream.name,
+			Type:   "RecordStream",
+			Volume: volume,
 		})
 	})
-	
+
 	return sources
 }
 
@@ -263,7 +263,7 @@ func (client *PAClient) SetDefaultOutput(action configuration.Action) error {
 		if target.Name == "" {
 			return nil
 		}
-		
+
 		// Find the output device
 		for _, stream := range client.outputs {
 			if stream.name == target.Name {

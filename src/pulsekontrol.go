@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -201,27 +200,10 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 
 			// Add an action for each source
 			for _, source := range slider.Sources {
-				// Convert the target type from the new config format to the legacy format
-				var targetType configuration.PulseAudioTargetType
-				// Convert to lowercase for case-insensitive comparison
-				sourceTypeLower := strings.ToLower(string(source.Type))
-				switch sourceTypeLower {
-				case "playback", "playbackstream":
-					targetType = configuration.PlaybackStream
-				case "record", "recordstream":
-					targetType = configuration.RecordStream
-				case "output", "outputdevice":
-					targetType = configuration.OutputDevice
-				case "input", "inputdevice":
-					targetType = configuration.InputDevice
-				default:
-					targetType = source.Type // Use as is if it matches legacy format
-				}
-
 				action := configuration.Action{
 					Type: configuration.SetVolume,
 					Target: &configuration.TypedTarget{
-						Type: targetType,
+						Type: source.Type,
 						Name: source.Name,
 					},
 				}
@@ -261,27 +243,10 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 
 			// Add an action for each source
 			for _, source := range knob.Sources {
-				// Convert the target type from the new config format to the legacy format
-				var targetType configuration.PulseAudioTargetType
-				// Convert to lowercase for case-insensitive comparison
-				sourceTypeLower := strings.ToLower(string(source.Type))
-				switch sourceTypeLower {
-				case "playback", "playbackstream":
-					targetType = configuration.PlaybackStream
-				case "record", "recordstream":
-					targetType = configuration.RecordStream
-				case "output", "outputdevice":
-					targetType = configuration.OutputDevice
-				case "input", "inputdevice":
-					targetType = configuration.InputDevice
-				default:
-					targetType = source.Type // Use as is if it matches legacy format
-				}
-
 				action := configuration.Action{
 					Type: configuration.SetVolume,
 					Target: &configuration.TypedTarget{
-						Type: targetType,
+						Type: source.Type,
 						Name: source.Name,
 					},
 				}
