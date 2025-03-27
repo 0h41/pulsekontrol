@@ -116,6 +116,40 @@ func Run() {
 		// Regenerate rules when sources are assigned
 		log.Info().Msg("Source assigned, updating MIDI rules")
 
+		// Extract assignment details
+		assignData, ok := data.(map[string]interface{})
+		if !ok {
+			log.Error().Msg("Invalid data format from source.assigned event")
+			return
+		}
+
+		// Immediately set the volume of the newly assigned source to match the control's current value
+		if initialValue, hasValue := assignData["initialValue"].(int); hasValue {
+			source, hasSource := assignData["source"].(configuration.Source)
+			if hasSource {
+				// Convert 0-100 value to 0.0-1.0 range for PulseAudio
+				volumePercent := float32(initialValue) / 100.0
+				
+				// Create a temporary action to set the volume
+				action := configuration.Action{
+					Type: configuration.SetVolume,
+					Target: &configuration.TypedTarget{
+						Type: source.Type,
+						Name: source.Name,
+					},
+				}
+				
+				// Process the volume action immediately
+				log.Info().
+					Str("sourceName", source.Name).
+					Str("sourceType", string(source.Type)).
+					Int("value", initialValue).
+					Msg("Setting initial volume for newly assigned source")
+					
+				paClient.ProcessVolumeAction(action, volumePercent)
+			}
+		}
+
 		// Recreate rules from current configuration - get the latest config!
 		currentConfig := configManager.GetConfig()
 		newRules := createRulesFromConfig(*currentConfig, midiDevice)

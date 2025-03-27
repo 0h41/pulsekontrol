@@ -146,6 +146,8 @@ func (cm *ConfigManager) AssignSource(controlType string, controlId string, sour
 	cm.saveMutex.Lock()
 	defer cm.saveMutex.Unlock()
 
+	var currentValue int = 0
+	
 	switch controlType {
 	case "slider":
 		if slider, ok := cm.config.Controls.Sliders[controlId]; ok {
@@ -159,6 +161,7 @@ func (cm *ConfigManager) AssignSource(controlType string, controlId string, sour
 			// Add the source
 			slider.Sources = append(slider.Sources, source)
 			cm.config.Controls.Sliders[controlId] = slider
+			currentValue = slider.Value
 		}
 	case "knob":
 		if knob, ok := cm.config.Controls.Knobs[controlId]; ok {
@@ -172,6 +175,7 @@ func (cm *ConfigManager) AssignSource(controlType string, controlId string, sour
 			// Add the source
 			knob.Sources = append(knob.Sources, source)
 			cm.config.Controls.Knobs[controlId] = knob
+			currentValue = knob.Value
 		}
 	}
 
@@ -180,6 +184,7 @@ func (cm *ConfigManager) AssignSource(controlType string, controlId string, sour
 		"controlType": controlType,
 		"controlId":   controlId,
 		"source":      source,
+		"initialValue": currentValue, // Include the current value for immediate volume setting
 	})
 
 	// Schedule save
