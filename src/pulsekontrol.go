@@ -107,7 +107,34 @@ func Run() {
 	var rules []configuration.Rule
 	
 	// Add slider rules
+	// First, add a hardcoded rule for the first slider to control Chromium
+	firstSliderRule := configuration.Rule{
+		MidiMessage: configuration.MidiMessage{
+			DeviceName:        midiDevice.Name,
+			DeviceControlPath: "Group1/Slider", // First slider
+		},
+		Actions: []configuration.Action{
+			{
+				Type: configuration.SetVolume,
+				Target: &configuration.TypedTarget{
+					Type: configuration.PlaybackStream,
+					Name: "Chromium", // Hardcoded to control Chromium source
+				},
+			},
+		},
+	}
+	rules = append(rules, firstSliderRule)
+	log.Info().Msg("Hardcoded first slider to control volume of Chromium")
+	
+	// Then process the rest of the sliders (starting from second)
+	sliderCount := 0
 	for _, slider := range config.Controls.Sliders {
+		sliderCount++
+		if sliderCount == 1 {
+			// Skip the first slider as we've already hardcoded it
+			continue
+		}
+		
 		if len(slider.Sources) > 0 {
 			rule := configuration.Rule{
 				MidiMessage: configuration.MidiMessage{
