@@ -93,7 +93,8 @@ main {
 }
 
 .card:hover {
-    transform: translateY(-2px);
+    /* Remove transform to prevent jumping */
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
 }
 
 #midi-status, #midi-model {
@@ -177,7 +178,7 @@ main {
 
 .mixer-channel:hover {
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    transform: translateY(-2px);
+    /* Remove the transform to prevent jumping */
 }
 
 .mixer-channel.dragging {
@@ -230,7 +231,7 @@ main {
 
 .source-item:hover {
     background-color: #e6f7ff;
-    transform: translateY(-2px);
+    /* Remove transform to prevent jumping */
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);
 }
 
@@ -265,18 +266,7 @@ main {
 .assigned-source {
     opacity: 0.7;
     position: relative;
-}
-
-.assigned-source::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(200, 200, 200, 0.1);
-    z-index: 1;
-    pointer-events: none;
+    background-color: #f0f0f0;
 }
 
 .missing-source {

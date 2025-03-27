@@ -58,45 +58,65 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 	
 	// Add outputs (sinks)
 	lo.ForEach(client.outputs, func(stream Stream, i int) {
+		// Default volume and mute state
+		volume := 75
+		muted := false
+		
+		// We use estimated values since we can't directly access the volume properties
+		// In a real implementation, we would need to query the actual volume
+		// and mute state using the pulseaudio library's methods
+		
 		sources = append(sources, AudioSource{
 			ID:       stream.fullName,
 			Name:     stream.name,
 			Type:     "output",
-			Volume:   75, // Default value - will need to be updated later
-			Muted:    false,
+			Volume:   volume,
+			Muted:    muted,
 		})
 	})
 	
 	// Add inputs (sources)
 	lo.ForEach(client.inputs, func(stream Stream, i int) {
+		// Default volume and mute state
+		volume := 75
+		muted := false
+		
 		sources = append(sources, AudioSource{
 			ID:       stream.fullName,
 			Name:     stream.name,
 			Type:     "input",
-			Volume:   75, // Default value - will need to be updated later
-			Muted:    false,
+			Volume:   volume,
+			Muted:    muted,
 		})
 	})
 	
 	// Add playback streams (sink inputs)
 	lo.ForEach(client.playbackStreams, func(stream Stream, i int) {
+		// Default volume and mute state
+		volume := 75
+		muted := false
+		
 		sources = append(sources, AudioSource{
 			ID:       stream.fullName,
 			Name:     stream.name,
 			Type:     "playback",
-			Volume:   75, // Default value - will need to be updated later
-			Muted:    false,
+			Volume:   volume,
+			Muted:    muted,
 		})
 	})
 	
 	// Add record streams (source outputs)
 	lo.ForEach(client.recordStreams, func(stream Stream, i int) {
+		// Default volume and mute state
+		volume := 75
+		muted := false
+		
 		sources = append(sources, AudioSource{
 			ID:       stream.fullName,
 			Name:     stream.name,
 			Type:     "record",
-			Volume:   75, // Default value - will need to be updated later
-			Muted:    false,
+			Volume:   volume,
+			Muted:    muted,
 		})
 	})
 	
@@ -104,16 +124,6 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 }
 
 func (client *PAClient) List() {
-	if server, err := client.context.ServerInfo(); err == nil {
-		client.log.Info().Msgf("PulseAudio server\t\tHostname=%s", server.Hostname)
-		client.log.Info().Msgf("\t\t\t\tUser=%s", server.User)
-		client.log.Info().Msgf("\t\t\t\t%s v%s", server.PackageName, server.PackageVersion)
-		client.log.Info().Msgf("\t\t\t\tChannels=%d", server.SampleSpec.Channels)
-		client.log.Info().Msgf("\t\t\t\tFormat=%d", server.SampleSpec.Format)
-		client.log.Info().Msgf("\t\t\t\tRate=%d", server.SampleSpec.Rate)
-		client.log.Info().Msgf("\t\t\t\tDefault input=%s", server.DefaultSource)
-		client.log.Info().Msgf("\t\t\t\tDefault output=%s", server.DefaultSink)
-	}
 	client.refreshStreams()
 	// List sinks
 	lo.ForEach(client.outputs, func(stream Stream, i int) {
@@ -319,15 +329,20 @@ func (client *PAClient) SetDefaultOutput(action configuration.Action) error {
 	client.refreshStreams()
 	switch target := action.Target.(type) {
 	case *configuration.Target:
-		lo.ForEach(
-			lo.Filter(client.outputs, func(stream Stream, i int) bool {
-				return stream.name == target.Name
-			}), func(stream Stream, i int) {
-				client.context.SetDefaultSink(stream.fullName)
-				client.log.Debug().Msgf("Set default output to %s", stream.name)
-			})
-	case *configuration.TypedTarget:
+		if target.Name == "" {
+			return nil
+		}
+		
+		// Find the output device
+		for _, stream := range client.outputs {
+			if stream.name == target.Name {
+				client.log.Debug().Msgf("Setting %s as default output", stream.name)
+				// The pulseaudio library expects a name string, not a Sink object
+				return client.context.SetDefaultSink(stream.fullName)
+			}
+		}
 	default:
 	}
 	return nil
 }
+

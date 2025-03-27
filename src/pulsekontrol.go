@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -121,14 +122,16 @@ func Run() {
 			for _, source := range slider.Sources {
 				// Convert the target type from the new config format to the legacy format
 				var targetType configuration.PulseAudioTargetType
-				switch source.Type {
-				case "playback":
+				// Convert to lowercase for case-insensitive comparison
+				sourceTypeLower := strings.ToLower(string(source.Type))
+				switch sourceTypeLower {
+				case "playback", "playbackstream":
 					targetType = configuration.PlaybackStream
-				case "record":
+				case "record", "recordstream":
 					targetType = configuration.RecordStream
-				case "output":
+				case "output", "outputdevice":
 					targetType = configuration.OutputDevice
-				case "input":
+				case "input", "inputdevice":
 					targetType = configuration.InputDevice
 				default:
 					targetType = source.Type // Use as is if it matches legacy format
@@ -164,14 +167,16 @@ func Run() {
 			for _, source := range knob.Sources {
 				// Convert the target type from the new config format to the legacy format
 				var targetType configuration.PulseAudioTargetType
-				switch source.Type {
-				case "playback":
+				// Convert to lowercase for case-insensitive comparison
+				sourceTypeLower := strings.ToLower(string(source.Type))
+				switch sourceTypeLower {
+				case "playback", "playbackstream":
 					targetType = configuration.PlaybackStream
-				case "record":
+				case "record", "recordstream":
 					targetType = configuration.RecordStream
-				case "output":
+				case "output", "outputdevice":
 					targetType = configuration.OutputDevice
-				case "input":
+				case "input", "inputdevice":
 					targetType = configuration.InputDevice
 				default:
 					targetType = source.Type // Use as is if it matches legacy format

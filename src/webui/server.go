@@ -145,7 +145,63 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			volume := int(volumeFloat)
 			log.Debug().Str("sourceId", sourceId).Int("volume", volume).Msg("Setting volume")
 			
-			// TODO: Implement volume change via pulseaudio client
+			// Get the sources and find the one with matching ID
+			sources := s.paClient.GetAudioSources()
+			var targetSource *pulseaudio.AudioSource
+			
+			for _, source := range sources {
+				if source.ID == sourceId {
+					targetSource = &source
+					break
+				}
+			}
+			
+			if targetSource == nil {
+				// It might be a virtual ID for an inactive source
+				parts := strings.SplitN(sourceId, ":", 2)
+				if len(parts) == 2 {
+					// Cannot adjust volume of inactive sources
+					log.Warn().Str("sourceId", sourceId).Msg("Cannot adjust volume of inactive source")
+					continue
+				}
+				
+				log.Error().Str("sourceId", sourceId).Msg("Source not found")
+				continue
+			}
+			
+			// Create an action to set volume
+			var targetType configuration.PulseAudioTargetType
+			// Convert to lowercase for case-insensitive comparison
+			sourceTypeLower := strings.ToLower(targetSource.Type)
+			switch sourceTypeLower {
+			case "playback", "playbackstream":
+				targetType = configuration.PlaybackStream
+			case "record", "recordstream":
+				targetType = configuration.RecordStream
+			case "output", "outputdevice":
+				targetType = configuration.OutputDevice
+			case "input", "inputdevice":
+				targetType = configuration.InputDevice
+			default:
+				log.Error().Str("type", targetSource.Type).Msg("Unknown source type")
+				continue
+			}
+			
+			action := configuration.Action{
+				Type: configuration.SetVolume,
+				Target: &configuration.TypedTarget{
+					Type: targetType,
+					Name: targetSource.Name,
+				},
+			}
+			
+			// Convert 0-100 volume to 0-1 for PulseAudio
+			volumePercent := float32(volume) / 100.0
+			
+			// Set volume
+			if err := s.paClient.ProcessVolumeAction(action, volumePercent); err != nil {
+				log.Error().Err(err).Str("sourceId", sourceId).Msg("Failed to set volume")
+			}
 			
 		case "updateControlValue":
 			// Client wants to update a control's value
@@ -233,9 +289,26 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 						Str("sourceName", sourceName).
 						Msg("Assigning inactive source")
 					
+					// Convert source type to proper PulseAudioTargetType format
+					var targetType configuration.PulseAudioTargetType
+					// Convert to lowercase for case-insensitive comparison
+					sourceTypeLower := strings.ToLower(sourceType)
+					switch sourceTypeLower {
+					case "playback", "playbackstream":
+						targetType = configuration.PlaybackStream
+					case "record", "recordstream":
+						targetType = configuration.RecordStream
+					case "output", "outputdevice":
+						targetType = configuration.OutputDevice
+					case "input", "inputdevice":
+						targetType = configuration.InputDevice
+					default:
+						targetType = configuration.PulseAudioTargetType(sourceType)
+					}
+					
 					// Create configuration source
 					configSource := configuration.Source{
-						Type: configuration.PulseAudioTargetType(sourceType),
+						Type: targetType,
 						Name: sourceName,
 					}
 					
@@ -305,10 +378,27 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 						Str("sourceName", sourceName).
 						Msg("Unassigning inactive source")
 					
+					// Convert source type to proper PulseAudioTargetType format
+					var targetType configuration.PulseAudioTargetType
+					// Convert to lowercase for case-insensitive comparison
+					sourceTypeLower := strings.ToLower(sourceType)
+					switch sourceTypeLower {
+					case "playback", "playbackstream":
+						targetType = configuration.PlaybackStream
+					case "record", "recordstream":
+						targetType = configuration.RecordStream
+					case "output", "outputdevice":
+						targetType = configuration.OutputDevice
+					case "input", "inputdevice":
+						targetType = configuration.InputDevice
+					default:
+						targetType = configuration.PulseAudioTargetType(sourceType)
+					}
+					
 					s.configManager.UnassignSource(
 						controlType,
 						controlId,
-						configuration.PulseAudioTargetType(sourceType),
+						targetType,
 						sourceName,
 					)
 				} else {
@@ -369,7 +459,7 @@ func (s *WebUIServer) handleBroadcasts() {
 
 // monitorAudioSources periodically fetches audio sources and broadcasts them to clients
 func (s *WebUIServer) monitorAudioSources() {
-	ticker := time.NewTicker(200 * time.Millisecond) // Much faster polling (200ms)
+	ticker := time.NewTicker(200 * time.Millisecond) // Poll at 200ms for responsive UI updates
 	defer ticker.Stop()
 
 	for {
@@ -391,7 +481,10 @@ func (s *WebUIServer) monitorAudioSources() {
 					found := false
 					// Find the source in our audio sources
 					for _, audioSource := range sources {
-						if audioSource.Type == string(source.Type) && audioSource.Name == source.Name {
+						// Use lowercase comparison for source types
+						sourceTypeLower := strings.ToLower(string(source.Type))
+						audioSourceTypeLower := strings.ToLower(audioSource.Type)
+						if audioSourceTypeLower == sourceTypeLower && audioSource.Name == source.Name {
 							sourceIds = append(sourceIds, audioSource.ID)
 							found = true
 							break
@@ -417,7 +510,10 @@ func (s *WebUIServer) monitorAudioSources() {
 					found := false
 					// Find the source in our audio sources
 					for _, audioSource := range sources {
-						if audioSource.Type == string(source.Type) && audioSource.Name == source.Name {
+						// Use lowercase comparison for source types
+						sourceTypeLower := strings.ToLower(string(source.Type))
+						audioSourceTypeLower := strings.ToLower(audioSource.Type)
+						if audioSourceTypeLower == sourceTypeLower && audioSource.Name == source.Name {
 							sourceIds = append(sourceIds, audioSource.ID)
 							found = true
 							break

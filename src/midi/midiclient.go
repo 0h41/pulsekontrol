@@ -10,8 +10,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/samber/lo"
 	"gitlab.com/gomidi/midi/v2"
-	"regexp"
-	"strings"
 
 	driver "gitlab.com/gomidi/midi/v2/drivers/portmididrv"
 )
@@ -188,42 +186,9 @@ func (client *MidiClient) Run() {
 					// Convert 0-127 MIDI value to 0-100 percentage
 					value := int((float64(ccValue) / 127.0) * 100.0)
 					
-					// First try to find a matching rule for this MIDI message
-					var controlFound bool
-					for _, rule := range client.Rules {
-						if rule.MidiMessage.Type == configuration.ControlChange &&
-							rule.MidiMessage.Channel == channel &&
-							rule.MidiMessage.Controller == controller &&
-							rule.MidiMessage.DeviceControlPath != "" {
-							
-							groupRe := regexp.MustCompile("^Group([1-8])/(Slider|Knob)$")
-							if groupRe.MatchString(rule.MidiMessage.DeviceControlPath) {
-								matches := groupRe.FindStringSubmatch(rule.MidiMessage.DeviceControlPath)
-								groupNumber := matches[1]
-								controlType := matches[2]
-								
-								// Format: "slider1" or "knob1"
-								controlId := strings.ToLower(controlType) + groupNumber
-								controlTypeKey := strings.ToLower(controlType)
-								
-								// Update the control value in the configuration
-								client.log.Debug().
-									Str("controlId", controlId).
-									Str("controlType", controlTypeKey).
-									Int("value", value).
-									Msg("Updating control value from MIDI via rule")
-								
-								// Update immediately for real-time response
-								client.ConfigManager.UpdateControlValue(controlTypeKey, controlId, value)
-								controlFound = true
-								break
-							}
-						}
-					}
-					
-					// If no rule found, try a different approach for the nanoKONTROL2
-					// Directly map controller numbers to slider/knobs based on device specifications
-					if !controlFound && client.MidiDevice.Type == configuration.KorgNanoKontrol2 {
+					// Directly map controller numbers for the nanoKONTROL2
+					// This is more reliable than trying to match rules
+					if client.MidiDevice.Type == configuration.KorgNanoKontrol2 {
 						// Standard mapping for nanoKONTROL2 in default mode
 						// For sliders: controllers 0-7 correspond to sliders 1-8
 						// For knobs: controllers 16-23 correspond to knobs 1-8
@@ -256,7 +221,7 @@ func (client *MidiClient) Run() {
 					}
 				}
 				
-				// Then, perform actions as normal
+				// Then, perform actions based on rules
 				for _, rule := range rules {
 					doActions(rule, ccValue)
 				}

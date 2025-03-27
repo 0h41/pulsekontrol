@@ -600,109 +600,50 @@ function handleSourcesDrop(e) {
     const oldParentType = e.dataTransfer.getData('parent-type');
     
     if (oldParentControl && oldParentType) {
-        // Unassign from the control
+        // Remove from old control
         unassignSource(oldParentControl, sourceId, oldParentType);
     }
     
     return false;
 }
 
+// Assign source to control
 function assignSource(controlId, sourceId, controlType) {
-    // Initialize the array if it doesn't exist
-    if (controlType === 'slider') {
-        if (!appState.sliderAssignments[controlId]) {
-            appState.sliderAssignments[controlId] = [];
-        }
-        
-        // Only add if not already assigned to this control
-        if (!appState.sliderAssignments[controlId].includes(sourceId)) {
-            appState.sliderAssignments[controlId].push(sourceId);
-        }
-    } else if (controlType === 'knob') {
-        if (!appState.knobAssignments[controlId]) {
-            appState.knobAssignments[controlId] = [];
-        }
-        
-        // Only add if not already assigned to this control
-        if (!appState.knobAssignments[controlId].includes(sourceId)) {
-            appState.knobAssignments[controlId].push(sourceId);
-        }
-    }
+    // Show animation/spinner to indicate change in progress
+    const controlDiv = document.getElementById(controlId);
     
-    // Send assignment to server
+    // Send to server
     sendMessage({
         type: 'assignControl',
         controlId: controlId,
         controlType: controlType,
         sourceId: sourceId
     });
-    
-    // Update UI to reflect new assignments
-    updateAudioSources(appState.audioSources);
 }
 
+// Remove source from control
 function unassignSource(controlId, sourceId, controlType) {
-    // Remove the source ID from the appropriate assignment array
-    if (controlType === 'slider') {
-        if (appState.sliderAssignments[controlId]) {
-            appState.sliderAssignments[controlId] = appState.sliderAssignments[controlId]
-                .filter(id => id !== sourceId);
-            
-            // Clean up empty arrays
-            if (appState.sliderAssignments[controlId].length === 0) {
-                delete appState.sliderAssignments[controlId];
-            }
-        }
-    } else if (controlType === 'knob') {
-        if (appState.knobAssignments[controlId]) {
-            appState.knobAssignments[controlId] = appState.knobAssignments[controlId]
-                .filter(id => id !== sourceId);
-            
-            // Clean up empty arrays
-            if (appState.knobAssignments[controlId].length === 0) {
-                delete appState.knobAssignments[controlId];
-            }
-        }
-    }
+    // Show animation/spinner to indicate change in progress
+    const controlDiv = document.getElementById(controlId);
     
-    // Send unassignment to server
+    // Send to server
     sendMessage({
         type: 'unassignControl',
         controlId: controlId,
         controlType: controlType,
         sourceId: sourceId
     });
-    
-    // Update UI to reflect new assignments
-    updateAudioSources(appState.audioSources);
 }
 
 // Send message to server
-function sendMessage(data) {
+function sendMessage(message) {
     if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify(data));
+        socket.send(JSON.stringify(message));
     } else {
-        console.warn('Cannot send message, socket not connected');
+        console.error('WebSocket not connected');
+        statusMessage.textContent = 'Cannot send message: WebSocket not connected';
     }
 }
 
-// Initialize the application
-function init() {
-    console.log('Initializing PulseKontrol WebUI');
-    connectWebSocket();
-    
-    // For demonstration purposes only - MIDI device simulation
-    setTimeout(() => {
-        // Simulate receiving MIDI device update
-        handleServerMessage({
-            type: 'midiDeviceUpdate',
-            device: {
-                connected: true,
-                name: 'KORG nanoKONTROL2'
-            }
-        });
-    }, 2000);
-}
-
-// Start the application when the page is loaded
-window.addEventListener('DOMContentLoaded', init);
+// Initialize
+connectWebSocket();
