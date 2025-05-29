@@ -2,6 +2,8 @@ package midi
 
 import (
 	"fmt"
+	"sync"
+	"time"
 	"github.com/0h41/pulsekontrol/src/configuration"
 	korgNanokontrol2 "github.com/0h41/pulsekontrol/src/device/korg/nanokontrol2"
 	"github.com/0h41/pulsekontrol/src/pulseaudio"
@@ -58,23 +60,114 @@ func List() {
 	}
 }
 
+type VolumeRequest struct {
+	Rule configuration.Rule
+	Value uint8
+	Timestamp time.Time
+}
+
 type MidiClient struct {
-	log           zerolog.Logger
-	PAClient      *pulseaudio.PAClient
-	MidiDevice    configuration.MidiDevice
-	Rules         []configuration.Rule
-	ConfigManager *configuration.ConfigManager
+	log            zerolog.Logger
+	PAClient       *pulseaudio.PAClient
+	MidiDevice     configuration.MidiDevice
+	Rules          []configuration.Rule
+	ConfigManager  *configuration.ConfigManager
+	volumeChannels map[string]chan VolumeRequest
+	channelsMutex  sync.RWMutex
 }
 
 func NewMidiClient(paClient *pulseaudio.PAClient, device configuration.MidiDevice, rules []configuration.Rule, configManager *configuration.ConfigManager) *MidiClient {
 	client := &MidiClient{
-		log:           log.With().Str("module", "Midi").Str("device", device.Name).Logger(),
-		PAClient:      paClient,
-		MidiDevice:    device,
-		Rules:         rules,
-		ConfigManager: configManager,
+		log:            log.With().Str("module", "Midi").Str("device", device.Name).Logger(),
+		PAClient:       paClient,
+		MidiDevice:     device,
+		Rules:          rules,
+		ConfigManager:  configManager,
+		volumeChannels: make(map[string]chan VolumeRequest),
 	}
+	client.startVolumeWorkers()
 	return client
+}
+
+// getOrCreateVolumeChannel gets or creates a volume channel for a rule
+func (client *MidiClient) getOrCreateVolumeChannel(ruleKey string) chan VolumeRequest {
+	client.channelsMutex.RLock()
+	ch, exists := client.volumeChannels[ruleKey]
+	client.channelsMutex.RUnlock()
+	
+	if !exists {
+		client.channelsMutex.Lock()
+		// Double-check after acquiring write lock
+		if ch, exists = client.volumeChannels[ruleKey]; !exists {
+			ch = make(chan VolumeRequest, 1) // Buffer size 1 for latest value
+			client.volumeChannels[ruleKey] = ch
+			go client.processVolumeRequests(ruleKey, ch)
+		}
+		client.channelsMutex.Unlock()
+	}
+	return ch
+}
+
+// startVolumeWorkers initializes volume processing for existing rules
+func (client *MidiClient) startVolumeWorkers() {
+	for _, rule := range client.Rules {
+		if len(rule.Actions) > 0 && rule.Actions[0].Type == configuration.SetVolume {
+			ruleKey := rule.MidiMessage.DeviceControlPath
+			client.getOrCreateVolumeChannel(ruleKey)
+		}
+	}
+}
+
+// processVolumeRequests processes volume requests for a specific rule
+func (client *MidiClient) processVolumeRequests(ruleKey string, ch chan VolumeRequest) {
+	for req := range ch {
+		client.processVolumeRequest(req)
+	}
+}
+
+// processVolumeRequest handles a single volume request
+func (client *MidiClient) processVolumeRequest(req VolumeRequest) {
+	client.log.Debug().Msgf("Processing volume request for rule: %s", req.Rule.MidiMessage.DeviceControlPath)
+	for _, action := range req.Rule.Actions {
+		switch action.Type {
+		case configuration.SetVolume:
+			var minValue uint8
+			var maxValue uint8
+			if req.Rule.MidiMessage.MinValue != 0 {
+				minValue = req.Rule.MidiMessage.MinValue
+			} else {
+				minValue = 0
+			}
+			if req.Rule.MidiMessage.MaxValue != 0 {
+				maxValue = req.Rule.MidiMessage.MaxValue
+			} else {
+				maxValue = 0x7f
+			}
+			volumePercent := float32(req.Value) / float32(maxValue-minValue)
+			
+			// Better logging of volume change
+			if target, ok := action.Target.(*configuration.TypedTarget); ok {
+				client.log.Debug().
+					Str("target", target.Name).
+					Str("type", string(target.Type)).
+					Float32("volume", volumePercent).
+					Msg("Setting volume")
+			}
+			
+			if err := client.PAClient.ProcessVolumeAction(action, volumePercent); err != nil {
+				client.log.Error().Err(err)
+			}
+		case configuration.SetDefaultOutput:
+			if req.Value == 0 {
+				return
+			}
+			if err := client.PAClient.SetDefaultOutput(action); err != nil {
+				client.log.Error().Err(err)
+			}
+		default:
+			client.log.Error().Msgf("Unknown action type %s in rule %+v", action.Type, req.Rule)
+		}
+	}
 }
 
 // UpdateRules updates the rules for the MIDI client dynamically
@@ -163,45 +256,56 @@ func (client *MidiClient) Run() {
 
 	onMessage := func(sysExChannel chan []byte) func(msg midi.Message, timestampMs int32) {
 		var doActions = func(rule configuration.Rule, value uint8) {
-			client.log.Debug().Msgf("Executing actions for rule: %s", rule.MidiMessage.DeviceControlPath)
+			client.log.Debug().Msgf("Received action for rule: %s", rule.MidiMessage.DeviceControlPath)
+			
+			// Check if this rule has volume actions
+			hasVolumeAction := false
 			for _, action := range rule.Actions {
-				switch action.Type {
-				case configuration.SetVolume:
-					var minValue uint8
-					var maxValue uint8
-					if rule.MidiMessage.MinValue != 0 {
-						minValue = rule.MidiMessage.MinValue
-					} else {
-						minValue = 0
-					}
-					if rule.MidiMessage.MaxValue != 0 {
-						maxValue = rule.MidiMessage.MaxValue
-					} else {
-						maxValue = 0x7f
-					}
-					volumePercent := float32(value) / float32(maxValue-minValue)
-					
-					// Better logging of volume change
-					if target, ok := action.Target.(*configuration.TypedTarget); ok {
-						client.log.Debug().
-							Str("target", target.Name).
-							Str("type", string(target.Type)).
-							Float32("volume", volumePercent).
-							Msg("Setting volume")
-					}
-					
-					if err := client.PAClient.ProcessVolumeAction(action, volumePercent); err != nil {
-						client.log.Error().Err(err)
-					}
-				case configuration.SetDefaultOutput:
-					if value == 0 {
-						return
-					}
-					if err := client.PAClient.SetDefaultOutput(action); err != nil {
-						client.log.Error().Err(err)
-					}
+				if action.Type == configuration.SetVolume {
+					hasVolumeAction = true
+					break
+				}
+			}
+			
+			if hasVolumeAction {
+				// Send to volume channel for coalescing
+				ruleKey := rule.MidiMessage.DeviceControlPath
+				ch := client.getOrCreateVolumeChannel(ruleKey)
+				
+				req := VolumeRequest{
+					Rule:      rule,
+					Value:     value,
+					Timestamp: time.Now(),
+				}
+				
+				// Non-blocking send - if channel is full, replace with latest value
+				select {
+				case ch <- req:
+					// Sent successfully
 				default:
-					client.log.Error().Msgf("Unknown action type %s in rule %+v", action.Type, rule)
+					// Channel full, drain and send latest
+					select {
+					case <-ch:
+						// Drained old value
+					default:
+						// Channel was already empty
+					}
+					ch <- req
+				}
+			} else {
+				// Handle non-volume actions immediately
+				for _, action := range rule.Actions {
+					switch action.Type {
+					case configuration.SetDefaultOutput:
+						if value == 0 {
+							return
+						}
+						if err := client.PAClient.SetDefaultOutput(action); err != nil {
+							client.log.Error().Err(err)
+						}
+					default:
+						client.log.Error().Msgf("Unknown action type %s in rule %+v", action.Type, rule)
+					}
 				}
 			}
 		}
