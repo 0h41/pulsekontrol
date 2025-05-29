@@ -24,6 +24,7 @@ type WebUIServer struct {
 	clients        map[*websocket.Conn]bool
 	broadcast      chan []byte
 	configUpdateCh chan interface{}
+	controlUpdateCh chan map[string]interface{}
 	paClient       *pulseaudio.PAClient
 	configManager  *configuration.ConfigManager
 	stopChan       chan struct{}
@@ -39,12 +40,13 @@ func NewWebUIServer(addr string, paClient *pulseaudio.PAClient, configManager *c
 				return true // Allow all connections for now
 			},
 		},
-		clients:        make(map[*websocket.Conn]bool),
-		broadcast:      make(chan []byte),
-		configUpdateCh: make(chan interface{}),
-		paClient:       paClient,
-		configManager:  configManager,
-		stopChan:       make(chan struct{}),
+		clients:         make(map[*websocket.Conn]bool),
+		broadcast:       make(chan []byte),
+		configUpdateCh:  make(chan interface{}),
+		controlUpdateCh: make(chan map[string]interface{}),
+		paClient:        paClient,
+		configManager:   configManager,
+		stopChan:        make(chan struct{}),
 	}
 }
 
@@ -510,12 +512,35 @@ func (s *WebUIServer) handleBroadcasts() {
 		select {
 		case message := <-s.broadcast:
 			// Send to all connected clients
+			log.Debug().Int("clientCount", len(s.clients)).Str("message", string(message)).Msg("Broadcasting message to WebSocket clients")
 			for client := range s.clients {
 				err := client.WriteMessage(websocket.TextMessage, message)
 				if err != nil {
 					log.Error().Err(err).Msg("Failed to send message to client")
 					client.Close()
 					delete(s.clients, client)
+				} else {
+					log.Debug().Msg("Successfully sent message to WebSocket client")
+				}
+			}
+		case controlUpdate := <-s.controlUpdateCh:
+			// Fast path for control value updates - send directly to clients
+			log.Debug().Interface("controlUpdate", controlUpdate).Msg("Processing fast path control update")
+			jsonData, err := json.Marshal(controlUpdate)
+			if err != nil {
+				log.Error().Err(err).Msg("Failed to marshal control value update")
+				continue
+			}
+			log.Debug().Int("clientCount", len(s.clients)).Str("json", string(jsonData)).Msg("Sending fast path JSON directly to WebSocket clients")
+			// Send directly to clients (avoid broadcast channel deadlock)
+			for client := range s.clients {
+				err := client.WriteMessage(websocket.TextMessage, jsonData)
+				if err != nil {
+					log.Error().Err(err).Msg("Failed to send fast path message to client")
+					client.Close()
+					delete(s.clients, client)
+				} else {
+					log.Debug().Msg("Successfully sent fast path message to WebSocket client")
 				}
 			}
 		case update := <-s.configUpdateCh:
@@ -596,4 +621,22 @@ func (s *WebUIServer) BroadcastMessage(message []byte) {
 // NotifyConfigUpdate sends a config update to all connected clients
 func (s *WebUIServer) NotifyConfigUpdate(update interface{}) {
 	s.configUpdateCh <- update
+}
+
+// NotifyControlValueUpdate sends a fast control value update to all connected clients
+func (s *WebUIServer) NotifyControlValueUpdate(controlType, controlId string, value int) {
+	update := map[string]interface{}{
+		"type":        "controlValueUpdate",
+		"controlType": controlType,
+		"controlId":   controlId,
+		"value":       value,
+	}
+	
+	// Non-blocking send to avoid slowing down MIDI processing
+	select {
+	case s.controlUpdateCh <- update:
+		// Sent successfully
+	default:
+		// Channel full, skip this update (next one will follow soon)
+	}
 }

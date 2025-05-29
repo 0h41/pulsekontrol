@@ -85,6 +85,21 @@ func Run() {
 			// you would serialize the data and broadcast it
 			webServer.NotifyConfigUpdate(data)
 		})
+		
+		// Fast path for control value updates
+		configManager.Subscribe("control.value.updated", func(data interface{}) {
+			log.Debug().Interface("data", data).Msg("Received control.value.updated notification")
+			if updateMap, ok := data.(map[string]interface{}); ok {
+				if controlType, ok := updateMap["type"].(string); ok {
+					if controlId, ok := updateMap["id"].(string); ok {
+						if value, ok := updateMap["value"].(int); ok {
+							log.Debug().Str("controlType", controlType).Str("controlId", controlId).Int("value", value).Msg("Sending fast path UI update")
+							webServer.NotifyControlValueUpdate(controlType, controlId, value)
+						}
+					}
+				}
+			}
+		})
 
 		go func() {
 			if err := webServer.Start(); err != nil {
