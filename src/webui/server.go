@@ -78,7 +78,7 @@ func (s *WebUIServer) Start() error {
 }
 
 // buildUIStateMessage creates a message with current UI state
-func (s *WebUIServer) buildUIStateMessage() ([]byte, error) {
+func (s *WebUIServer) buildUIStateMessage(includeControlValues bool) ([]byte, error) {
 	// Get audio sources
 	sources := s.paClient.GetAudioSources()
 	
@@ -87,7 +87,11 @@ func (s *WebUIServer) buildUIStateMessage() ([]byte, error) {
 	
 	// Map of slider assignments (controlId -> sourceIds)
 	sliderAssignments := make(map[string][]string)
-	sliderValues := make(map[string]int)
+	var sliderValues map[string]int
+	if includeControlValues {
+		sliderValues = make(map[string]int)
+	}
+	
 	for id, slider := range config.Controls.Sliders {
 		sourceIds := []string{}
 		// For each source in the slider, find the matching audio source
@@ -111,12 +115,18 @@ func (s *WebUIServer) buildUIStateMessage() ([]byte, error) {
 			}
 		}
 		sliderAssignments[id] = sourceIds
-		sliderValues[id] = slider.Value
+		if includeControlValues {
+			sliderValues[id] = slider.Value
+		}
 	}
 	
 	// Map of knob assignments (controlId -> sourceIds)
 	knobAssignments := make(map[string][]string)
-	knobValues := make(map[string]int)
+	var knobValues map[string]int
+	if includeControlValues {
+		knobValues = make(map[string]int)
+	}
+	
 	for id, knob := range config.Controls.Knobs {
 		sourceIds := []string{}
 		// For each source in the knob, find the matching audio source
@@ -140,7 +150,9 @@ func (s *WebUIServer) buildUIStateMessage() ([]byte, error) {
 			}
 		}
 		knobAssignments[id] = sourceIds
-		knobValues[id] = knob.Value
+		if includeControlValues {
+			knobValues[id] = knob.Value
+		}
 	}
 	
 	// Create message with sources and control mappings
@@ -148,9 +160,13 @@ func (s *WebUIServer) buildUIStateMessage() ([]byte, error) {
 		"type":              "audioSourcesUpdate",
 		"sources":           sources,
 		"sliderAssignments": sliderAssignments,
-		"sliderValues":      sliderValues,
 		"knobAssignments":   knobAssignments,
-		"knobValues":        knobValues,
+	}
+	
+	// Only include control values if requested (for initial load)
+	if includeControlValues {
+		message["sliderValues"] = sliderValues
+		message["knobValues"] = knobValues
 	}
 	
 	// Convert to JSON
@@ -208,7 +224,7 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		switch msgType {
 		case "getState":
 			// Client is requesting initial state - send it immediately rather than waiting for next poll
-			jsonData, err := s.buildUIStateMessage()
+			jsonData, err := s.buildUIStateMessage(true) // Include control values for initial load
 			if err != nil {
 				log.Error().Err(err).Msg("Failed to marshal audio sources and assignments")
 				continue
@@ -576,7 +592,7 @@ func (s *WebUIServer) handleBroadcasts() {
 
 // monitorAudioSources periodically fetches audio sources and broadcasts them to clients
 func (s *WebUIServer) monitorAudioSources() {
-	ticker := time.NewTicker(200 * time.Millisecond) // Poll at 200ms for responsive UI updates
+	ticker := time.NewTicker(2 * time.Second) // Poll every 2s for structural changes (new/removed audio sources)
 	defer ticker.Stop()
 
 	// Store previous state as a hash of the JSON message
@@ -585,8 +601,8 @@ func (s *WebUIServer) monitorAudioSources() {
 	for {
 		select {
 		case <-ticker.C:
-			// Get current UI state message
-			jsonData, err := s.buildUIStateMessage()
+			// Get current UI state message (exclude control values - fast path handles those)
+			jsonData, err := s.buildUIStateMessage(false) // Only structural changes
 			if err != nil {
 				log.Error().Err(err).Msg("Failed to marshal audio sources and assignments")
 				continue
