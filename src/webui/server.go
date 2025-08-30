@@ -496,11 +496,15 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			
 			if sourceToRemove != nil {
 				// Source is active, unassign normally
+				sourceToUnassign := configuration.Source{
+					Type:       configuration.PulseAudioTargetType(sourceToRemove.Type),
+					Name:       sourceToRemove.Name,
+					BinaryName: sourceToRemove.BinaryName,
+				}
 				s.configManager.UnassignSource(
 					controlType,
 					controlId,
-					configuration.PulseAudioTargetType(sourceToRemove.Type),
-					sourceToRemove.Name,
+					sourceToUnassign,
 				)
 			} else {
 				// Source might be a virtual ID for an inactive source
@@ -532,11 +536,15 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 						targetType = configuration.PulseAudioTargetType(sourceType)
 					}
 					
+					virtualSource := configuration.Source{
+						Type:       targetType,
+						Name:       sourceName,
+						BinaryName: "", // Virtual sources don't have binary name
+					}
 					s.configManager.UnassignSource(
 						controlType,
 						controlId,
-						targetType,
-						sourceName,
+						virtualSource,
 					)
 				} else {
 					log.Error().Str("sourceId", sourceId).Msg("Invalid virtual source ID format")

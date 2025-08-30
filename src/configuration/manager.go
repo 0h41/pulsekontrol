@@ -153,7 +153,7 @@ func (cm *ConfigManager) AssignSource(controlType string, controlId string, sour
 		if slider, ok := cm.config.Controls.Sliders[controlId]; ok {
 			// Check if source is already assigned to this control
 			for _, existingSource := range slider.Sources {
-				if existingSource.Type == source.Type && existingSource.Name == source.Name {
+				if existingSource.Type == source.Type && existingSource.Name == source.Name && existingSource.BinaryName == source.BinaryName {
 					// Already assigned, do nothing
 					return
 				}
@@ -167,7 +167,7 @@ func (cm *ConfigManager) AssignSource(controlType string, controlId string, sour
 		if knob, ok := cm.config.Controls.Knobs[controlId]; ok {
 			// Check if source is already assigned to this control
 			for _, existingSource := range knob.Sources {
-				if existingSource.Type == source.Type && existingSource.Name == source.Name {
+				if existingSource.Type == source.Type && existingSource.Name == source.Name && existingSource.BinaryName == source.BinaryName {
 					// Already assigned, do nothing
 					return
 				}
@@ -192,7 +192,7 @@ func (cm *ConfigManager) AssignSource(controlType string, controlId string, sour
 }
 
 // UnassignSource removes an audio source from a control
-func (cm *ConfigManager) UnassignSource(controlType string, controlId string, sourceType PulseAudioTargetType, sourceName string) {
+func (cm *ConfigManager) UnassignSource(controlType string, controlId string, source Source) {
 	cm.saveMutex.Lock()
 	defer cm.saveMutex.Unlock()
 
@@ -201,9 +201,9 @@ func (cm *ConfigManager) UnassignSource(controlType string, controlId string, so
 		if slider, ok := cm.config.Controls.Sliders[controlId]; ok {
 			// Filter out the source to remove
 			var updatedSources []Source
-			for _, source := range slider.Sources {
-				if !(source.Type == sourceType && source.Name == sourceName) {
-					updatedSources = append(updatedSources, source)
+			for _, existingSource := range slider.Sources {
+				if !(existingSource.Type == source.Type && existingSource.Name == source.Name && existingSource.BinaryName == source.BinaryName) {
+					updatedSources = append(updatedSources, existingSource)
 				}
 			}
 			slider.Sources = updatedSources
@@ -213,9 +213,9 @@ func (cm *ConfigManager) UnassignSource(controlType string, controlId string, so
 		if knob, ok := cm.config.Controls.Knobs[controlId]; ok {
 			// Filter out the source to remove
 			var updatedSources []Source
-			for _, source := range knob.Sources {
-				if !(source.Type == sourceType && source.Name == sourceName) {
-					updatedSources = append(updatedSources, source)
+			for _, existingSource := range knob.Sources {
+				if !(existingSource.Type == source.Type && existingSource.Name == source.Name && existingSource.BinaryName == source.BinaryName) {
+					updatedSources = append(updatedSources, existingSource)
 				}
 			}
 			knob.Sources = updatedSources
@@ -227,8 +227,8 @@ func (cm *ConfigManager) UnassignSource(controlType string, controlId string, so
 	cm.Notify("source.unassigned", map[string]interface{}{
 		"controlType": controlType,
 		"controlId":   controlId,
-		"sourceType":  sourceType,
-		"sourceName":  sourceName,
+		"sourceType":  source.Type,
+		"sourceName":  source.Name,
 	})
 
 	// Schedule save
@@ -238,7 +238,12 @@ func (cm *ConfigManager) UnassignSource(controlType string, controlId string, so
 // MigrateSourceBinaryName updates an existing source to include binary name for specificity
 func (cm *ConfigManager) MigrateSourceBinaryName(controlType string, controlId string, sourceType PulseAudioTargetType, sourceName string, binaryName string) {
 	// First unassign the old source (without binary name)
-	cm.UnassignSource(controlType, controlId, sourceType, sourceName)
+	oldSource := Source{
+		Type:       sourceType,
+		Name:       sourceName,
+		BinaryName: "", // Legacy source without binary name
+	}
+	cm.UnassignSource(controlType, controlId, oldSource)
 	
 	// Then assign the new source (with binary name)  
 	newSource := Source{
