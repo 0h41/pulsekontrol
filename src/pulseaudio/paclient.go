@@ -134,6 +134,55 @@ func (client *PAClient) List() {
 	})
 }
 
+// ListDetailed shows detailed information about streams including all properties
+func (client *PAClient) ListDetailed() {
+	client.refreshStreams()
+	
+	// List detailed playback streams
+	client.log.Info().Msg("=== Detailed Playback Streams ===")
+	lo.ForEach(client.playbackStreams, func(stream Stream, i int) {
+		if sinkInput, ok := stream.paStream.(pulseaudio.SinkInput); ok {
+			client.log.Info().Msgf("Stream %d: %s", i+1, stream.name)
+			client.log.Info().Msgf("  Full Name: %s", stream.fullName)
+			client.log.Info().Msg("  Properties:")
+			for key, value := range sinkInput.PropList {
+				client.log.Info().Msgf("    %s: %s", key, value)
+			}
+			client.log.Info().Msg("---")
+		}
+	})
+	
+	// Also list other types with basic info for completeness
+	if len(client.outputs) > 0 {
+		client.log.Info().Msg("=== Output Devices ===")
+		lo.ForEach(client.outputs, func(stream Stream, i int) {
+			client.log.Info().Msgf("Device %d: %s (ID: %s)", i+1, stream.name, stream.fullName)
+		})
+	}
+	
+	if len(client.inputs) > 0 {
+		client.log.Info().Msg("=== Input Devices ===")
+		lo.ForEach(client.inputs, func(stream Stream, i int) {
+			client.log.Info().Msgf("Device %d: %s (ID: %s)", i+1, stream.name, stream.fullName)
+		})
+	}
+	
+	if len(client.recordStreams) > 0 {
+		client.log.Info().Msg("=== Record Streams ===")
+		lo.ForEach(client.recordStreams, func(stream Stream, i int) {
+			if sourceOutput, ok := stream.paStream.(pulseaudio.SourceOutput); ok {
+				client.log.Info().Msgf("Stream %d: %s", i+1, stream.name)
+				client.log.Info().Msgf("  Full Name: %s", stream.fullName)
+				client.log.Info().Msg("  Properties:")
+				for key, value := range sourceOutput.PropList {
+					client.log.Info().Msgf("    %s: %s", key, value)
+				}
+				client.log.Info().Msg("---")
+			}
+		})
+	}
+}
+
 func (client *PAClient) refreshStreams() error {
 	// Sinks
 	sinks, err := client.context.Sinks()

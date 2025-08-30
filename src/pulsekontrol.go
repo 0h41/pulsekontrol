@@ -36,6 +36,7 @@ func Run() {
 	opt.Bool("list", false, opt.Alias("l"), opt.Description("List MIDI ports & PulseAudio objects"))
 	opt.Bool("list-midi", false, opt.Alias("m"), opt.Description("List MIDI ports"))
 	opt.Bool("list-pulse", false, opt.Alias("p"), opt.Description("List PulseAudio objects"))
+	opt.Bool("list-pulse-detailed", false, opt.Description("List PulseAudio objects with detailed properties"))
 	opt.Bool("version", false, opt.Alias("v"), opt.Description("Show version"))
 	opt.Bool("no-webui", false, opt.Description("Disable web interface"))
 	webAddr := opt.StringOptional("web-addr", "127.0.0.1:6080", opt.Description("Web interface address:port"))
@@ -55,6 +56,10 @@ func Run() {
 	}
 	if opt.Called("list-pulse") {
 		paClient.List()
+		os.Exit(0)
+	}
+	if opt.Called("list-pulse-detailed") {
+		paClient.ListDetailed()
 		os.Exit(0)
 	}
 	if opt.Called("version") {
