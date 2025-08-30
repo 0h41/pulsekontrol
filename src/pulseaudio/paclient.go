@@ -12,8 +12,8 @@ import (
 )
 
 type Stream struct {
-	name       string
-	fullName   string
+	Name       string
+	FullName   string
 	BinaryName string
 	paStream   interface{}
 }
@@ -26,13 +26,20 @@ type AudioSource struct {
 	Volume     int    `json:"volume"`
 }
 
+// StreamEventCallback is called when a new stream is detected
+type StreamEventCallback func(stream Stream, streamType configuration.PulseAudioTargetType)
+
 type PAClient struct {
-	log             zerolog.Logger
-	context         *pulseaudio.Client
-	outputs         []Stream
-	playbackStreams []Stream
-	inputs          []Stream
-	recordStreams   []Stream
+	log                    zerolog.Logger
+	context                *pulseaudio.Client
+	outputs                []Stream
+	playbackStreams        []Stream
+	inputs                 []Stream
+	recordStreams          []Stream
+	previousPlaybackIDs    map[string]bool
+	previousRecordIDs      map[string]bool
+	newStreamCallback      StreamEventCallback
+	monitoringEnabled      bool
 }
 
 func NewPAClient() *PAClient {
@@ -41,12 +48,16 @@ func NewPAClient() *PAClient {
 		panic(err)
 	}
 	client := &PAClient{
-		log:             log.With().Str("module", "PulseAudio").Logger(),
-		context:         context,
-		outputs:         []Stream{},
-		playbackStreams: []Stream{},
-		inputs:          []Stream{},
-		recordStreams:   []Stream{},
+		log:                    log.With().Str("module", "PulseAudio").Logger(),
+		context:                context,
+		outputs:                []Stream{},
+		playbackStreams:        []Stream{},
+		inputs:                 []Stream{},
+		recordStreams:          []Stream{},
+		previousPlaybackIDs:    make(map[string]bool),
+		previousRecordIDs:      make(map[string]bool),
+		newStreamCallback:      nil,
+		monitoringEnabled:      false,
 	}
 	return client
 }
@@ -68,8 +79,8 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 		// using the pulseaudio library's methods
 
 		sources = append(sources, AudioSource{
-			ID:         stream.fullName,
-			Name:       stream.name,
+			ID:         stream.FullName,
+			Name:       stream.Name,
 			BinaryName: stream.BinaryName,
 			Type:       "OutputDevice",
 			Volume:     volume,
@@ -82,8 +93,8 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 		volume := 75
 
 		sources = append(sources, AudioSource{
-			ID:         stream.fullName,
-			Name:       stream.name,
+			ID:         stream.FullName,
+			Name:       stream.Name,
 			BinaryName: stream.BinaryName,
 			Type:       "InputDevice",
 			Volume:     volume,
@@ -96,8 +107,8 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 		volume := 75
 
 		sources = append(sources, AudioSource{
-			ID:         stream.fullName,
-			Name:       stream.name,
+			ID:         stream.FullName,
+			Name:       stream.Name,
 			BinaryName: stream.BinaryName,
 			Type:       "PlaybackStream",
 			Volume:     volume,
@@ -110,8 +121,8 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 		volume := 75
 
 		sources = append(sources, AudioSource{
-			ID:         stream.fullName,
-			Name:       stream.name,
+			ID:         stream.FullName,
+			Name:       stream.Name,
 			BinaryName: stream.BinaryName,
 			Type:       "RecordStream",
 			Volume:     volume,
@@ -125,25 +136,25 @@ func (client *PAClient) List() {
 	client.refreshStreams()
 	// List sinks
 	lo.ForEach(client.outputs, func(stream Stream, i int) {
-		client.log.Info().Msgf("Found output device:\t%s", stream.name)
+		client.log.Info().Msgf("Found output device:\t%s", stream.Name)
 	})
 	// List sources
 	lo.ForEach(client.inputs, func(stream Stream, i int) {
-		client.log.Info().Msgf("Found input device:\t%s", stream.name)
+		client.log.Info().Msgf("Found input device:\t%s", stream.Name)
 	})
 	// List sinks inputs
 	lo.ForEach(client.playbackStreams, func(stream Stream, i int) {
-		displayName := stream.name
+		displayName := stream.Name
 		if stream.BinaryName != "" {
-			displayName = fmt.Sprintf("%s (%s)", stream.name, stream.BinaryName)
+			displayName = fmt.Sprintf("%s (%s)", stream.Name, stream.BinaryName)
 		}
 		client.log.Info().Msgf("Found playback stream:\t%s", displayName)
 	})
 	// List sources
 	lo.ForEach(client.recordStreams, func(stream Stream, i int) {
-		displayName := stream.name
+		displayName := stream.Name
 		if stream.BinaryName != "" {
-			displayName = fmt.Sprintf("%s (%s)", stream.name, stream.BinaryName)
+			displayName = fmt.Sprintf("%s (%s)", stream.Name, stream.BinaryName)
 		}
 		client.log.Info().Msgf("Found record stream:\t%s", displayName)
 	})
@@ -157,8 +168,8 @@ func (client *PAClient) ListDetailed() {
 	client.log.Info().Msg("=== Detailed Playback Streams ===")
 	lo.ForEach(client.playbackStreams, func(stream Stream, i int) {
 		if sinkInput, ok := stream.paStream.(pulseaudio.SinkInput); ok {
-			client.log.Info().Msgf("Stream %d: %s", i+1, stream.name)
-			client.log.Info().Msgf("  Full Name: %s", stream.fullName)
+			client.log.Info().Msgf("Stream %d: %s", i+1, stream.Name)
+			client.log.Info().Msgf("  Full Name: %s", stream.FullName)
 			if stream.BinaryName != "" {
 				client.log.Info().Msgf("  Binary Name: %s", stream.BinaryName)
 			}
@@ -174,14 +185,14 @@ func (client *PAClient) ListDetailed() {
 	if len(client.outputs) > 0 {
 		client.log.Info().Msg("=== Output Devices ===")
 		lo.ForEach(client.outputs, func(stream Stream, i int) {
-			client.log.Info().Msgf("Device %d: %s (ID: %s)", i+1, stream.name, stream.fullName)
+			client.log.Info().Msgf("Device %d: %s (ID: %s)", i+1, stream.Name, stream.FullName)
 		})
 	}
 	
 	if len(client.inputs) > 0 {
 		client.log.Info().Msg("=== Input Devices ===")
 		lo.ForEach(client.inputs, func(stream Stream, i int) {
-			client.log.Info().Msgf("Device %d: %s (ID: %s)", i+1, stream.name, stream.fullName)
+			client.log.Info().Msgf("Device %d: %s (ID: %s)", i+1, stream.Name, stream.FullName)
 		})
 	}
 	
@@ -189,8 +200,8 @@ func (client *PAClient) ListDetailed() {
 		client.log.Info().Msg("=== Record Streams ===")
 		lo.ForEach(client.recordStreams, func(stream Stream, i int) {
 			if sourceOutput, ok := stream.paStream.(pulseaudio.SourceOutput); ok {
-				client.log.Info().Msgf("Stream %d: %s", i+1, stream.name)
-				client.log.Info().Msgf("  Full Name: %s", stream.fullName)
+				client.log.Info().Msgf("Stream %d: %s", i+1, stream.Name)
+				client.log.Info().Msgf("  Full Name: %s", stream.FullName)
 				client.log.Info().Msg("  Properties:")
 				for key, value := range sourceOutput.PropList {
 					client.log.Info().Msgf("    %s: %s", key, value)
@@ -209,8 +220,8 @@ func (client *PAClient) refreshStreams() error {
 	}
 	client.outputs = lo.Map(sinks, func(sink pulseaudio.Sink, i int) Stream {
 		return Stream{
-			name:     sink.Description,
-			fullName: sink.Name,
+			Name:     sink.Description,
+			FullName: sink.Name,
 			paStream: sink,
 		}
 	})
@@ -221,8 +232,8 @@ func (client *PAClient) refreshStreams() error {
 	}
 	client.inputs = lo.Map(sources, func(source pulseaudio.Source, i int) Stream {
 		return Stream{
-			name:     source.Description,
-			fullName: source.Name,
+			Name:     source.Description,
+			FullName: source.Name,
 			paStream: source,
 		}
 	})
@@ -247,8 +258,8 @@ func (client *PAClient) refreshStreams() error {
 		}
 		
 		return Stream{
-			name:       name,
-			fullName:   uniqueId,
+			Name:       name,
+			FullName:   uniqueId,
 			BinaryName: binaryName,
 			paStream:   sinkInput,
 		}
@@ -274,8 +285,8 @@ func (client *PAClient) refreshStreams() error {
 		}
 		
 		return Stream{
-			name:       name,
-			fullName:   uniqueId,
+			Name:       name,
+			FullName:   uniqueId,
 			BinaryName: binaryName,
 			paStream:   sourceOutput,
 		}
@@ -316,7 +327,7 @@ func (client *PAClient) smartMatchStreams(streams []Stream, target *configuratio
 
 	for _, stream := range streams {
 		client.log.Debug().
-			Str("streamName", stream.name).
+			Str("streamName", stream.Name).
 			Str("streamBinaryName", stream.BinaryName).
 			Str("targetName", target.Name).
 			Str("targetBinaryName", target.BinaryName).
@@ -324,18 +335,18 @@ func (client *PAClient) smartMatchStreams(streams []Stream, target *configuratio
 			
 		if target.BinaryName != "" {
 			// Enhanced config: exact match required
-			if stream.name == target.Name && stream.BinaryName == target.BinaryName {
+			if stream.Name == target.Name && stream.BinaryName == target.BinaryName {
 				client.log.Debug().
-					Str("streamName", stream.name).
+					Str("streamName", stream.Name).
 					Str("streamBinaryName", stream.BinaryName).
 					Msg("EXACT MATCH found")
 				matchedStreams = append(matchedStreams, stream)
 			}
 		} else {
 			// Legacy config: name match triggers migration
-			if stream.name == target.Name {
+			if stream.Name == target.Name {
 				client.log.Debug().
-					Str("streamName", stream.name).
+					Str("streamName", stream.Name).
 					Str("streamBinaryName", stream.BinaryName).
 					Msg("LEGACY MATCH found")
 				matchedStreams = append(matchedStreams, stream)
@@ -362,24 +373,24 @@ func (client *PAClient) ProcessVolumeAction(action configuration.Action, volumeP
 			if target.Name == "Default" {
 				if defaultSink, err := client.context.GetDefaultSink(); err == nil {
 					streams = slices.Concat(streams, lo.Filter(client.outputs, func(stream Stream, i int) bool {
-						return stream.fullName == defaultSink.Name
+						return stream.FullName == defaultSink.Name
 					}))
 				}
 			} else {
 				streams = slices.Concat(streams, lo.Filter(client.outputs, func(stream Stream, i int) bool {
-					return stream.name == target.Name
+					return stream.Name == target.Name
 				}))
 			}
 		} else if target.Type == configuration.InputDevice {
 			if target.Name == "Default" {
 				if defaultSource, err := client.context.GetDefaultSource(); err == nil {
 					streams = slices.Concat(streams, lo.Filter(client.inputs, func(stream Stream, i int) bool {
-						return stream.fullName == defaultSource.Name
+						return stream.FullName == defaultSource.Name
 					}))
 				}
 			} else {
 				streams = slices.Concat(streams, lo.Filter(client.inputs, func(stream Stream, i int) bool {
-					return stream.name == target.Name
+					return stream.Name == target.Name
 				}))
 			}
 		} else if target.Type == configuration.PlaybackStream {
@@ -410,16 +421,16 @@ func (client *PAClient) ProcessVolumeAction(action configuration.Action, volumeP
 		switch st := stream.paStream.(type) {
 		case pulseaudio.Sink:
 			st.SetVolume(volumePercent)
-			client.log.Debug().Msgf("Set %s volume to %f", stream.name, volumePercent)
+			client.log.Debug().Msgf("Set %s volume to %f", stream.Name, volumePercent)
 		case pulseaudio.SinkInput:
 			st.SetVolume(volumePercent)
-			client.log.Debug().Msgf("Set %s volume to %f", stream.name, volumePercent)
+			client.log.Debug().Msgf("Set %s volume to %f", stream.Name, volumePercent)
 		case pulseaudio.Source:
 			st.SetVolume(volumePercent)
-			client.log.Debug().Msgf("Set %s volume to %f", stream.name, volumePercent)
+			client.log.Debug().Msgf("Set %s volume to %f", stream.Name, volumePercent)
 		case pulseaudio.SourceOutput:
 			st.SetVolume(volumePercent)
-			client.log.Debug().Msgf("Set %s volume to %f", stream.name, volumePercent)
+			client.log.Debug().Msgf("Set %s volume to %f", stream.Name, volumePercent)
 		}
 	})
 	return nil
@@ -435,13 +446,116 @@ func (client *PAClient) SetDefaultOutput(action configuration.Action) error {
 
 		// Find the output device
 		for _, stream := range client.outputs {
-			if stream.name == target.Name {
-				client.log.Debug().Msgf("Setting %s as default output", stream.name)
+			if stream.Name == target.Name {
+				client.log.Debug().Msgf("Setting %s as default output", stream.Name)
 				// The pulseaudio library expects a name string, not a Sink object
-				return client.context.SetDefaultSink(stream.fullName)
+				return client.context.SetDefaultSink(stream.FullName)
 			}
 		}
 	default:
 	}
 	return nil
+}
+
+// SetNewStreamCallback sets the callback function that will be called when new streams are detected
+func (client *PAClient) SetNewStreamCallback(callback StreamEventCallback) {
+	client.newStreamCallback = callback
+}
+
+// StartStreamMonitoring begins monitoring for new audio streams
+func (client *PAClient) StartStreamMonitoring() error {
+	if client.monitoringEnabled {
+		return nil
+	}
+
+	// Subscribe to sink input and source output events (new streams)
+	subscriptionMask := pulseaudio.SUBSCRIPTION_MASK_SINK_INPUT | pulseaudio.SUBSCRIPTION_MASK_SOURCE_OUTPUT
+	updates, err := client.context.UpdatesByType(pulseaudio.DevType(subscriptionMask))
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to PulseAudio events: %w", err)
+	}
+
+	// Initialize the previous stream IDs by getting current state
+	client.refreshStreams()
+	client.updatePreviousStreamIDs()
+
+	client.monitoringEnabled = true
+	client.log.Info().Msg("Started monitoring for new audio streams")
+
+	// Start goroutine to handle updates
+	go func() {
+		for range updates {
+			if !client.monitoringEnabled {
+				break
+			}
+			client.handleStreamUpdate()
+		}
+	}()
+
+	return nil
+}
+
+// StopStreamMonitoring stops monitoring for new audio streams
+func (client *PAClient) StopStreamMonitoring() {
+	if !client.monitoringEnabled {
+		return
+	}
+	client.monitoringEnabled = false
+	client.log.Info().Msg("Stopped monitoring for new audio streams")
+}
+
+// updatePreviousStreamIDs updates the tracking maps with current stream IDs
+func (client *PAClient) updatePreviousStreamIDs() {
+	// Clear previous IDs
+	client.previousPlaybackIDs = make(map[string]bool)
+	client.previousRecordIDs = make(map[string]bool)
+
+	// Add current playback streams
+	for _, stream := range client.playbackStreams {
+		client.previousPlaybackIDs[stream.FullName] = true
+	}
+
+	// Add current record streams
+	for _, stream := range client.recordStreams {
+		client.previousRecordIDs[stream.FullName] = true
+	}
+}
+
+// handleStreamUpdate is called when PulseAudio sends an update event
+func (client *PAClient) handleStreamUpdate() {
+	// Refresh to get latest streams
+	client.refreshStreams()
+
+	// Check for new playback streams
+	for _, stream := range client.playbackStreams {
+		if !client.previousPlaybackIDs[stream.FullName] {
+			client.log.Info().
+				Str("streamName", stream.Name).
+				Str("binaryName", stream.BinaryName).
+				Str("streamID", stream.FullName).
+				Msg("New playback stream detected")
+			
+			if client.newStreamCallback != nil {
+				client.newStreamCallback(stream, configuration.PlaybackStream)
+			}
+		}
+	}
+
+	// Check for new record streams
+	for _, stream := range client.recordStreams {
+		if !client.previousRecordIDs[stream.FullName] {
+			client.log.Info().
+				Str("streamName", stream.Name).
+				Str("binaryName", stream.BinaryName).
+				Str("streamID", stream.FullName).
+				Msg("New record stream detected")
+			
+			if client.newStreamCallback != nil {
+				client.newStreamCallback(stream, configuration.RecordStream)
+			}
+		}
+	}
+
+	// Update previous IDs for next comparison
+	client.updatePreviousStreamIDs()
 }

@@ -197,21 +197,27 @@ func Run() {
 	// and sync initial volumes to control positions
 	triggerStartupVolumeActions(paClient, configManager)
 
+	// Set up stream monitoring for automatic volume application
+	setupStreamMonitoring(paClient, configManager)
+
 	// Set up signal handling for graceful shutdown
-	setupSignalHandling()
+	setupSignalHandling(paClient)
 
 	// Wait for program to exit
 	select {}
 }
 
-func setupSignalHandling() {
+func setupSignalHandling(paClient *pulseaudio.PAClient) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		sig := <-sigChan
 		log.Info().Msgf("Received signal %s, shutting down...", sig)
-		// TODO: Add cleanup logic here
+		
+		// Stop stream monitoring
+		paClient.StopStreamMonitoring()
+		
 		os.Exit(0)
 	}()
 }
@@ -333,6 +339,31 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 
 	return rules
 }
+
+// setupStreamMonitoring configures automatic volume application for new streams
+func setupStreamMonitoring(paClient *pulseaudio.PAClient, configManager *configuration.ConfigManager) {
+	// Set up callback for new streams - just re-trigger all existing volume actions
+	paClient.SetNewStreamCallback(func(stream pulseaudio.Stream, streamType configuration.PulseAudioTargetType) {
+		log.Info().
+			Str("streamName", stream.Name).
+			Str("streamBinary", stream.BinaryName).
+			Str("streamType", string(streamType)).
+			Msg("New stream detected, re-applying all volume settings")
+
+		// Just re-trigger the startup volume actions - this uses the exact same code path as startup
+		triggerStartupVolumeActions(paClient, configManager)
+	})
+
+	// Start monitoring
+	err := paClient.StartStreamMonitoring()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to start stream monitoring")
+		return
+	}
+
+	log.Info().Msg("Stream monitoring enabled - new applications will automatically have volumes applied")
+}
+
 
 // triggerStartupVolumeActions processes all slider/knob assignments at startup
 // This triggers migration logic and syncs volumes to control positions
