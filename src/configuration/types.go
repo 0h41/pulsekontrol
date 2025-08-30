@@ -50,8 +50,9 @@ type Target struct {
 }
 
 type TypedTarget struct {
-	Type PulseAudioTargetType `yaml:"type"`
-	Name string               `yaml:"name"`
+	Type       PulseAudioTargetType `yaml:"type"`
+	Name       string               `yaml:"name"`
+	BinaryName string               `yaml:"binaryName,omitempty"`
 }
 
 type Action struct {
@@ -84,8 +85,9 @@ const (
 
 // Source represents an audio source or destination
 type Source struct {
-	Type PulseAudioTargetType `yaml:"type"`
-	Name string               `yaml:"name"`
+	Type       PulseAudioTargetType `yaml:"type"`
+	Name       string               `yaml:"name"`
+	BinaryName string               `yaml:"binaryName,omitempty"`
 }
 
 // Button action types

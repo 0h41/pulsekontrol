@@ -192,6 +192,10 @@ func Run() {
 
 	go midiClient.Run()
 
+	// Trigger initial volume actions to perform any needed config migrations
+	// and sync initial volumes to control positions
+	triggerStartupVolumeActions(paClient, config)
+
 	// Set up signal handling for graceful shutdown
 	setupSignalHandling()
 
@@ -315,4 +319,58 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 	}
 
 	return rules
+}
+
+// triggerStartupVolumeActions processes all slider/knob assignments at startup
+// This triggers migration logic and syncs volumes to control positions
+func triggerStartupVolumeActions(paClient *pulseaudio.PAClient, config configuration.Config) {
+	log.Info().Msg("Processing startup volume actions for migration and sync")
+
+	// Process all sliders
+	for controlID, slider := range config.Controls.Sliders {
+		if len(slider.Sources) > 0 {
+			volumePercent := float32(slider.Value) / 100.0
+			log.Debug().
+				Str("control", controlID).
+				Int("value", slider.Value).
+				Int("sources", len(slider.Sources)).
+				Msg("Processing startup slider")
+			
+			for _, source := range slider.Sources {
+				action := configuration.Action{
+					Type: configuration.SetVolume,
+					Target: &configuration.TypedTarget{
+						Type: source.Type,
+						Name: source.Name,
+						BinaryName: source.BinaryName, // This will be empty for legacy configs
+					},
+				}
+				paClient.ProcessVolumeAction(action, volumePercent)
+			}
+		}
+	}
+
+	// Process all knobs  
+	for controlID, knob := range config.Controls.Knobs {
+		if len(knob.Sources) > 0 {
+			volumePercent := float32(knob.Value) / 100.0
+			log.Debug().
+				Str("control", controlID).
+				Int("value", knob.Value).
+				Int("sources", len(knob.Sources)).
+				Msg("Processing startup knob")
+				
+			for _, source := range knob.Sources {
+				action := configuration.Action{
+					Type: configuration.SetVolume,
+					Target: &configuration.TypedTarget{
+						Type: source.Type,
+						Name: source.Name,
+						BinaryName: source.BinaryName, // This will be empty for legacy configs
+					},
+				}
+				paClient.ProcessVolumeAction(action, volumePercent)
+			}
+		}
+	}
 }

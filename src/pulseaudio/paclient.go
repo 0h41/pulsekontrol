@@ -267,6 +267,30 @@ func (client *PAClient) refreshStreams() error {
 	return nil
 }
 
+// smartMatchStreams implements the smart matching logic for application streams
+func (client *PAClient) smartMatchStreams(streams []Stream, target *configuration.TypedTarget) ([]Stream, *Stream) {
+	var matchedStreams []Stream
+	var migrationStream *Stream
+
+	for _, stream := range streams {
+		if target.BinaryName != "" {
+			// Enhanced config: exact match required
+			if stream.name == target.Name && stream.binaryName == target.BinaryName {
+				matchedStreams = append(matchedStreams, stream)
+			}
+		} else {
+			// Legacy config: name match triggers migration
+			if stream.name == target.Name {
+				matchedStreams = append(matchedStreams, stream)
+				if migrationStream == nil && stream.binaryName != "" {
+					migrationStream = &stream
+				}
+			}
+		}
+	}
+	return matchedStreams, migrationStream
+}
+
 func (client *PAClient) ProcessVolumeAction(action configuration.Action, volumePercent float32) error {
 	var streams []Stream
 	client.refreshStreams()
@@ -297,13 +321,25 @@ func (client *PAClient) ProcessVolumeAction(action configuration.Action, volumeP
 				}))
 			}
 		} else if target.Type == configuration.PlaybackStream {
-			streams = slices.Concat(streams, lo.Filter(client.playbackStreams, func(stream Stream, i int) bool {
-				return stream.name == target.Name
-			}))
+			matchedStreams, migrationNeeded := client.smartMatchStreams(client.playbackStreams, target)
+			if migrationNeeded != nil {
+				// TODO: Trigger migration callback here
+				// For now, just log that migration would be needed
+				client.log.Info().
+					Str("targetName", target.Name).
+					Str("streamBinary", migrationNeeded.binaryName).
+					Msg("Config migration needed: would set binaryName")
+			}
+			streams = slices.Concat(streams, matchedStreams)
 		} else if target.Type == configuration.RecordStream {
-			streams = slices.Concat(streams, lo.Filter(client.recordStreams, func(stream Stream, i int) bool {
-				return stream.name == target.Name
-			}))
+			matchedStreams, migrationNeeded := client.smartMatchStreams(client.recordStreams, target)
+			if migrationNeeded != nil {
+				client.log.Info().
+					Str("targetName", target.Name).
+					Str("streamBinary", migrationNeeded.binaryName).
+					Msg("Config migration needed: would set binaryName")
+			}
+			streams = slices.Concat(streams, matchedStreams)
 		}
 	case *configuration.Target:
 	default:
