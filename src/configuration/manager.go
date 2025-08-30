@@ -234,3 +234,23 @@ func (cm *ConfigManager) UnassignSource(controlType string, controlId string, so
 	// Schedule save
 	cm.SaveWithDebounce()
 }
+
+// MigrateSourceBinaryName updates an existing source to include binary name for specificity
+func (cm *ConfigManager) MigrateSourceBinaryName(controlType string, controlId string, sourceType PulseAudioTargetType, sourceName string, binaryName string) {
+	// First unassign the old source (without binary name)
+	cm.UnassignSource(controlType, controlId, sourceType, sourceName)
+	
+	// Then assign the new source (with binary name)  
+	newSource := Source{
+		Type:       sourceType,
+		Name:       sourceName,
+		BinaryName: binaryName,
+	}
+	cm.AssignSource(controlType, controlId, newSource)
+	
+	log.Info().
+		Str("controlType", controlType).
+		Str("sourceName", sourceName).
+		Str("binaryName", binaryName).
+		Msg("Migrated source to include binary name")
+}

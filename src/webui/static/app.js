@@ -297,10 +297,13 @@ function updateAudioSources(sources) {
             typeBadge.textContent = source.type;
             sourceDiv.appendChild(typeBadge);
             
-            // Add label
+            // Add label with enhanced name if binary name exists
             const label = document.createElement('label');
-            label.textContent = source.name;
-            label.title = source.name; // For tooltip on hover
+            const displayName = source.binaryName && source.binaryName !== '' 
+                ? `${source.name} (${source.binaryName})` 
+                : source.name;
+            label.textContent = displayName;
+            label.title = displayName; // For tooltip on hover
             sourceDiv.appendChild(label);
             
             // Add drag event handlers
@@ -361,10 +364,13 @@ function renderControlWithSources(controlDiv, control, assignedSourceIds, availa
         typeBadge.textContent = source.type;
         sourceItem.appendChild(typeBadge);
         
-        // Add source name
+        // Add source name with enhanced display if binary name exists
         const sourceName = document.createElement('span');
-        sourceName.textContent = source.name;
-        sourceName.title = source.name; // For tooltip on hover
+        const displayName = source.binaryName && source.binaryName !== '' 
+            ? `${source.name} (${source.binaryName})` 
+            : source.name;
+        sourceName.textContent = displayName;
+        sourceName.title = displayName; // For tooltip on hover
         sourceItem.appendChild(sourceName);
         
         sourcesList.appendChild(sourceItem);

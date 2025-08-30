@@ -102,10 +102,23 @@ func (s *WebUIServer) buildUIStateMessage(includeControlValues bool) ([]byte, er
 				// Use lowercase comparison for source types
 				sourceTypeLower := strings.ToLower(string(source.Type))
 				audioSourceTypeLower := strings.ToLower(audioSource.Type)
+				
+				// For enhanced configs (with BinaryName), require exact match
+				// For legacy configs (without BinaryName), match any stream with same name/type
 				if audioSourceTypeLower == sourceTypeLower && audioSource.Name == source.Name {
-					sourceIds = append(sourceIds, audioSource.ID)
-					found = true
-					break
+					if source.BinaryName != "" {
+						// Enhanced config: require exact BinaryName match
+						if audioSource.BinaryName == source.BinaryName {
+							sourceIds = append(sourceIds, audioSource.ID)
+							found = true
+							break
+						}
+					} else {
+						// Legacy config: any matching name/type
+						sourceIds = append(sourceIds, audioSource.ID)
+						found = true
+						break
+					}
 				}
 			}
 			// If source not found in current sources, create a virtual ID for it
@@ -137,10 +150,23 @@ func (s *WebUIServer) buildUIStateMessage(includeControlValues bool) ([]byte, er
 				// Use lowercase comparison for source types
 				sourceTypeLower := strings.ToLower(string(source.Type))
 				audioSourceTypeLower := strings.ToLower(audioSource.Type)
+				
+				// For enhanced configs (with BinaryName), require exact match
+				// For legacy configs (without BinaryName), match any stream with same name/type
 				if audioSourceTypeLower == sourceTypeLower && audioSource.Name == source.Name {
-					sourceIds = append(sourceIds, audioSource.ID)
-					found = true
-					break
+					if source.BinaryName != "" {
+						// Enhanced config: require exact BinaryName match
+						if audioSource.BinaryName == source.BinaryName {
+							sourceIds = append(sourceIds, audioSource.ID)
+							found = true
+							break
+						}
+					} else {
+						// Legacy config: any matching name/type
+						sourceIds = append(sourceIds, audioSource.ID)
+						found = true
+						break
+					}
 				}
 			}
 			// If source not found in current sources, create a virtual ID for it
@@ -381,8 +407,9 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if sourceToAssign != nil {
 				// Create configuration source
 				configSource := configuration.Source{
-					Type: configuration.PulseAudioTargetType(sourceToAssign.Type),
-					Name: sourceToAssign.Name,
+					Type:       configuration.PulseAudioTargetType(sourceToAssign.Type),
+					Name:       sourceToAssign.Name,
+					BinaryName: sourceToAssign.BinaryName,
 				}
 				
 				// Update configuration

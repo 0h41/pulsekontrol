@@ -156,6 +156,7 @@ func Run() {
 					Target: &configuration.TypedTarget{
 						Type: source.Type,
 						Name: source.Name,
+						BinaryName: source.BinaryName,
 					},
 				}
 				
@@ -194,7 +195,7 @@ func Run() {
 
 	// Trigger initial volume actions to perform any needed config migrations
 	// and sync initial volumes to control positions
-	triggerStartupVolumeActions(paClient, config)
+	triggerStartupVolumeActions(paClient, configManager)
 
 	// Set up signal handling for graceful shutdown
 	setupSignalHandling()
@@ -258,11 +259,17 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 
 			// Add an action for each source
 			for _, source := range slider.Sources {
+				log.Debug().
+					Str("sourceName", source.Name).
+					Str("sourceBinaryName", source.BinaryName).
+					Str("sourceType", string(source.Type)).
+					Msg("Creating action for slider source")
 				action := configuration.Action{
 					Type: configuration.SetVolume,
 					Target: &configuration.TypedTarget{
 						Type: source.Type,
 						Name: source.Name,
+						BinaryName: source.BinaryName,
 					},
 				}
 				rule.Actions = append(rule.Actions, action)
@@ -301,11 +308,17 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 
 			// Add an action for each source
 			for _, source := range knob.Sources {
+				log.Debug().
+					Str("sourceName", source.Name).
+					Str("sourceBinaryName", source.BinaryName).
+					Str("sourceType", string(source.Type)).
+					Msg("Creating action for knob source")
 				action := configuration.Action{
 					Type: configuration.SetVolume,
 					Target: &configuration.TypedTarget{
 						Type: source.Type,
 						Name: source.Name,
+						BinaryName: source.BinaryName,
 					},
 				}
 				rule.Actions = append(rule.Actions, action)
@@ -323,7 +336,8 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 
 // triggerStartupVolumeActions processes all slider/knob assignments at startup
 // This triggers migration logic and syncs volumes to control positions
-func triggerStartupVolumeActions(paClient *pulseaudio.PAClient, config configuration.Config) {
+func triggerStartupVolumeActions(paClient *pulseaudio.PAClient, configManager *configuration.ConfigManager) {
+	config := *configManager.GetConfig()
 	log.Info().Msg("Processing startup volume actions for migration and sync")
 
 	// Process all sliders
@@ -337,12 +351,26 @@ func triggerStartupVolumeActions(paClient *pulseaudio.PAClient, config configura
 				Msg("Processing startup slider")
 			
 			for _, source := range slider.Sources {
+				// Check if migration is needed before processing
+				if source.BinaryName == "" {
+					// This is a legacy config - check if we need to migrate
+					matchedStreams, migrationStream := paClient.SmartMatchStreams(source.Type, source.Name)
+					if migrationStream != nil && len(matchedStreams) > 0 {
+						// Perform migration immediately
+						configManager.MigrateSourceBinaryName("slider", controlID, source.Type, source.Name, migrationStream.BinaryName)
+						// Get updated config after migration
+						config = *configManager.GetConfig()
+						log.Info().Str("control", controlID).Str("source", source.Name).Str("binary", migrationStream.BinaryName).Msg("Performed migration during startup")
+						continue // Skip to next source - the migrated source will be processed in the updated config
+					}
+				}
+				
 				action := configuration.Action{
 					Type: configuration.SetVolume,
 					Target: &configuration.TypedTarget{
 						Type: source.Type,
 						Name: source.Name,
-						BinaryName: source.BinaryName, // This will be empty for legacy configs
+						BinaryName: source.BinaryName,
 					},
 				}
 				paClient.ProcessVolumeAction(action, volumePercent)
@@ -361,12 +389,26 @@ func triggerStartupVolumeActions(paClient *pulseaudio.PAClient, config configura
 				Msg("Processing startup knob")
 				
 			for _, source := range knob.Sources {
+				// Check if migration is needed before processing
+				if source.BinaryName == "" {
+					// This is a legacy config - check if we need to migrate
+					matchedStreams, migrationStream := paClient.SmartMatchStreams(source.Type, source.Name)
+					if migrationStream != nil && len(matchedStreams) > 0 {
+						// Perform migration immediately
+						configManager.MigrateSourceBinaryName("knob", controlID, source.Type, source.Name, migrationStream.BinaryName)
+						// Get updated config after migration
+						config = *configManager.GetConfig()
+						log.Info().Str("control", controlID).Str("source", source.Name).Str("binary", migrationStream.BinaryName).Msg("Performed migration during startup")
+						continue // Skip to next source - the migrated source will be processed in the updated config
+					}
+				}
+				
 				action := configuration.Action{
 					Type: configuration.SetVolume,
 					Target: &configuration.TypedTarget{
 						Type: source.Type,
 						Name: source.Name,
-						BinaryName: source.BinaryName, // This will be empty for legacy configs
+						BinaryName: source.BinaryName,
 					},
 				}
 				paClient.ProcessVolumeAction(action, volumePercent)

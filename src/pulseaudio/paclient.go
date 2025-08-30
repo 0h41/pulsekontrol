@@ -14,7 +14,7 @@ import (
 type Stream struct {
 	name       string
 	fullName   string
-	binaryName string
+	BinaryName string
 	paStream   interface{}
 }
 
@@ -70,7 +70,7 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 		sources = append(sources, AudioSource{
 			ID:         stream.fullName,
 			Name:       stream.name,
-			BinaryName: stream.binaryName,
+			BinaryName: stream.BinaryName,
 			Type:       "OutputDevice",
 			Volume:     volume,
 		})
@@ -84,7 +84,7 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 		sources = append(sources, AudioSource{
 			ID:         stream.fullName,
 			Name:       stream.name,
-			BinaryName: stream.binaryName,
+			BinaryName: stream.BinaryName,
 			Type:       "InputDevice",
 			Volume:     volume,
 		})
@@ -98,7 +98,7 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 		sources = append(sources, AudioSource{
 			ID:         stream.fullName,
 			Name:       stream.name,
-			BinaryName: stream.binaryName,
+			BinaryName: stream.BinaryName,
 			Type:       "PlaybackStream",
 			Volume:     volume,
 		})
@@ -112,7 +112,7 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 		sources = append(sources, AudioSource{
 			ID:         stream.fullName,
 			Name:       stream.name,
-			BinaryName: stream.binaryName,
+			BinaryName: stream.BinaryName,
 			Type:       "RecordStream",
 			Volume:     volume,
 		})
@@ -134,16 +134,16 @@ func (client *PAClient) List() {
 	// List sinks inputs
 	lo.ForEach(client.playbackStreams, func(stream Stream, i int) {
 		displayName := stream.name
-		if stream.binaryName != "" {
-			displayName = fmt.Sprintf("%s (%s)", stream.name, stream.binaryName)
+		if stream.BinaryName != "" {
+			displayName = fmt.Sprintf("%s (%s)", stream.name, stream.BinaryName)
 		}
 		client.log.Info().Msgf("Found playback stream:\t%s", displayName)
 	})
 	// List sources
 	lo.ForEach(client.recordStreams, func(stream Stream, i int) {
 		displayName := stream.name
-		if stream.binaryName != "" {
-			displayName = fmt.Sprintf("%s (%s)", stream.name, stream.binaryName)
+		if stream.BinaryName != "" {
+			displayName = fmt.Sprintf("%s (%s)", stream.name, stream.BinaryName)
 		}
 		client.log.Info().Msgf("Found record stream:\t%s", displayName)
 	})
@@ -159,8 +159,8 @@ func (client *PAClient) ListDetailed() {
 		if sinkInput, ok := stream.paStream.(pulseaudio.SinkInput); ok {
 			client.log.Info().Msgf("Stream %d: %s", i+1, stream.name)
 			client.log.Info().Msgf("  Full Name: %s", stream.fullName)
-			if stream.binaryName != "" {
-				client.log.Info().Msgf("  Binary Name: %s", stream.binaryName)
+			if stream.BinaryName != "" {
+				client.log.Info().Msgf("  Binary Name: %s", stream.BinaryName)
 			}
 			client.log.Info().Msg("  Properties:")
 			for key, value := range sinkInput.PropList {
@@ -238,10 +238,18 @@ func (client *PAClient) refreshStreams() error {
 			name = sinkInput.PropList["media.name"]
 		}
 		binaryName := sinkInput.PropList["application.process.binary"]
+		
+		// Create unique ID by combining stream restore ID with object ID
+		objectId := sinkInput.PropList["object.id"]
+		uniqueId := sinkInput.PropList["module-stream-restore.id"]
+		if objectId != "" {
+			uniqueId = uniqueId + ":" + objectId
+		}
+		
 		return Stream{
 			name:       name,
-			fullName:   sinkInput.PropList["module-stream-restore.id"],
-			binaryName: binaryName,
+			fullName:   uniqueId,
+			BinaryName: binaryName,
 			paStream:   sinkInput,
 		}
 	})
@@ -257,14 +265,42 @@ func (client *PAClient) refreshStreams() error {
 			name = sourceOutput.PropList["media.name"]
 		}
 		binaryName := sourceOutput.PropList["application.process.binary"]
+		
+		// Create unique ID by combining stream restore ID with object ID
+		objectId := sourceOutput.PropList["object.id"]
+		uniqueId := sourceOutput.PropList["module-stream-restore.id"]
+		if objectId != "" {
+			uniqueId = uniqueId + ":" + objectId
+		}
+		
 		return Stream{
 			name:       name,
-			fullName:   sourceOutput.PropList["module-stream-restore.id"],
-			binaryName: binaryName,
+			fullName:   uniqueId,
+			BinaryName: binaryName,
 			paStream:   sourceOutput,
 		}
 	})
 	return nil
+}
+
+// SmartMatchStreams is a public wrapper for smart matching by source type and name
+func (client *PAClient) SmartMatchStreams(sourceType configuration.PulseAudioTargetType, sourceName string) ([]Stream, *Stream) {
+	client.refreshStreams()
+	
+	target := &configuration.TypedTarget{
+		Type: sourceType,
+		Name: sourceName,
+		BinaryName: "", // Always empty for migration detection
+	}
+	
+	switch sourceType {
+	case configuration.PlaybackStream:
+		return client.smartMatchStreams(client.playbackStreams, target)
+	case configuration.RecordStream:
+		return client.smartMatchStreams(client.recordStreams, target)
+	default:
+		return nil, nil // No migration needed for device types
+	}
 }
 
 // smartMatchStreams implements the smart matching logic for application streams
@@ -272,22 +308,48 @@ func (client *PAClient) smartMatchStreams(streams []Stream, target *configuratio
 	var matchedStreams []Stream
 	var migrationStream *Stream
 
+	client.log.Debug().
+		Str("targetName", target.Name).
+		Str("targetBinaryName", target.BinaryName).
+		Int("totalStreams", len(streams)).
+		Msg("smartMatchStreams called")
+
 	for _, stream := range streams {
+		client.log.Debug().
+			Str("streamName", stream.name).
+			Str("streamBinaryName", stream.BinaryName).
+			Str("targetName", target.Name).
+			Str("targetBinaryName", target.BinaryName).
+			Msg("Checking stream for match")
+			
 		if target.BinaryName != "" {
 			// Enhanced config: exact match required
-			if stream.name == target.Name && stream.binaryName == target.BinaryName {
+			if stream.name == target.Name && stream.BinaryName == target.BinaryName {
+				client.log.Debug().
+					Str("streamName", stream.name).
+					Str("streamBinaryName", stream.BinaryName).
+					Msg("EXACT MATCH found")
 				matchedStreams = append(matchedStreams, stream)
 			}
 		} else {
 			// Legacy config: name match triggers migration
 			if stream.name == target.Name {
+				client.log.Debug().
+					Str("streamName", stream.name).
+					Str("streamBinaryName", stream.BinaryName).
+					Msg("LEGACY MATCH found")
 				matchedStreams = append(matchedStreams, stream)
-				if migrationStream == nil && stream.binaryName != "" {
+				if migrationStream == nil && stream.BinaryName != "" {
 					migrationStream = &stream
 				}
 			}
 		}
 	}
+	
+	client.log.Debug().
+		Int("matchedCount", len(matchedStreams)).
+		Msg("smartMatchStreams result")
+	
 	return matchedStreams, migrationStream
 }
 
@@ -327,7 +389,7 @@ func (client *PAClient) ProcessVolumeAction(action configuration.Action, volumeP
 				// For now, just log that migration would be needed
 				client.log.Info().
 					Str("targetName", target.Name).
-					Str("streamBinary", migrationNeeded.binaryName).
+					Str("streamBinary", migrationNeeded.BinaryName).
 					Msg("Config migration needed: would set binaryName")
 			}
 			streams = slices.Concat(streams, matchedStreams)
@@ -336,7 +398,7 @@ func (client *PAClient) ProcessVolumeAction(action configuration.Action, volumeP
 			if migrationNeeded != nil {
 				client.log.Info().
 					Str("targetName", target.Name).
-					Str("streamBinary", migrationNeeded.binaryName).
+					Str("streamBinary", migrationNeeded.BinaryName).
 					Msg("Config migration needed: would set binaryName")
 			}
 			streams = slices.Concat(streams, matchedStreams)
