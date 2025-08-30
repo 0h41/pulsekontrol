@@ -1,6 +1,7 @@
 package pulseaudio
 
 import (
+	"fmt"
 	"slices"
 
 	"github.com/0h41/pulsekontrol/src/configuration"
@@ -11,16 +12,18 @@ import (
 )
 
 type Stream struct {
-	name     string
-	fullName string
-	paStream interface{}
+	name       string
+	fullName   string
+	binaryName string
+	paStream   interface{}
 }
 
 type AudioSource struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Type   string `json:"type"`
-	Volume int    `json:"volume"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	BinaryName string `json:"binaryName"`
+	Type       string `json:"type"`
+	Volume     int    `json:"volume"`
 }
 
 type PAClient struct {
@@ -65,10 +68,11 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 		// using the pulseaudio library's methods
 
 		sources = append(sources, AudioSource{
-			ID:     stream.fullName,
-			Name:   stream.name,
-			Type:   "OutputDevice",
-			Volume: volume,
+			ID:         stream.fullName,
+			Name:       stream.name,
+			BinaryName: stream.binaryName,
+			Type:       "OutputDevice",
+			Volume:     volume,
 		})
 	})
 
@@ -78,10 +82,11 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 		volume := 75
 
 		sources = append(sources, AudioSource{
-			ID:     stream.fullName,
-			Name:   stream.name,
-			Type:   "InputDevice",
-			Volume: volume,
+			ID:         stream.fullName,
+			Name:       stream.name,
+			BinaryName: stream.binaryName,
+			Type:       "InputDevice",
+			Volume:     volume,
 		})
 	})
 
@@ -91,10 +96,11 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 		volume := 75
 
 		sources = append(sources, AudioSource{
-			ID:     stream.fullName,
-			Name:   stream.name,
-			Type:   "PlaybackStream",
-			Volume: volume,
+			ID:         stream.fullName,
+			Name:       stream.name,
+			BinaryName: stream.binaryName,
+			Type:       "PlaybackStream",
+			Volume:     volume,
 		})
 	})
 
@@ -104,10 +110,11 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 		volume := 75
 
 		sources = append(sources, AudioSource{
-			ID:     stream.fullName,
-			Name:   stream.name,
-			Type:   "RecordStream",
-			Volume: volume,
+			ID:         stream.fullName,
+			Name:       stream.name,
+			BinaryName: stream.binaryName,
+			Type:       "RecordStream",
+			Volume:     volume,
 		})
 	})
 
@@ -126,11 +133,19 @@ func (client *PAClient) List() {
 	})
 	// List sinks inputs
 	lo.ForEach(client.playbackStreams, func(stream Stream, i int) {
-		client.log.Info().Msgf("Found playback stream:\t%s", stream.name)
+		displayName := stream.name
+		if stream.binaryName != "" {
+			displayName = fmt.Sprintf("%s (%s)", stream.name, stream.binaryName)
+		}
+		client.log.Info().Msgf("Found playback stream:\t%s", displayName)
 	})
 	// List sources
 	lo.ForEach(client.recordStreams, func(stream Stream, i int) {
-		client.log.Info().Msgf("Found record stream:\t%s", stream.name)
+		displayName := stream.name
+		if stream.binaryName != "" {
+			displayName = fmt.Sprintf("%s (%s)", stream.name, stream.binaryName)
+		}
+		client.log.Info().Msgf("Found record stream:\t%s", displayName)
 	})
 }
 
@@ -144,6 +159,9 @@ func (client *PAClient) ListDetailed() {
 		if sinkInput, ok := stream.paStream.(pulseaudio.SinkInput); ok {
 			client.log.Info().Msgf("Stream %d: %s", i+1, stream.name)
 			client.log.Info().Msgf("  Full Name: %s", stream.fullName)
+			if stream.binaryName != "" {
+				client.log.Info().Msgf("  Binary Name: %s", stream.binaryName)
+			}
 			client.log.Info().Msg("  Properties:")
 			for key, value := range sinkInput.PropList {
 				client.log.Info().Msgf("    %s: %s", key, value)
@@ -219,10 +237,12 @@ func (client *PAClient) refreshStreams() error {
 		if len(name) < 1 {
 			name = sinkInput.PropList["media.name"]
 		}
+		binaryName := sinkInput.PropList["application.process.binary"]
 		return Stream{
-			name:     name,
-			fullName: sinkInput.PropList["module-stream-restore.id"],
-			paStream: sinkInput,
+			name:       name,
+			fullName:   sinkInput.PropList["module-stream-restore.id"],
+			binaryName: binaryName,
+			paStream:   sinkInput,
 		}
 	})
 	// Sources outputs
@@ -236,10 +256,12 @@ func (client *PAClient) refreshStreams() error {
 		if len(name) < 1 {
 			name = sourceOutput.PropList["media.name"]
 		}
+		binaryName := sourceOutput.PropList["application.process.binary"]
 		return Stream{
-			name:     name,
-			fullName: sourceOutput.PropList["module-stream-restore.id"],
-			paStream: sourceOutput,
+			name:       name,
+			fullName:   sourceOutput.PropList["module-stream-restore.id"],
+			binaryName: binaryName,
+			paStream:   sourceOutput,
 		}
 	})
 	return nil
