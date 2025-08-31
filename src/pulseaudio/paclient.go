@@ -2,6 +2,7 @@ package pulseaudio
 
 import (
 	"fmt"
+	"os/exec"
 	"slices"
 
 	"github.com/0h41/pulsekontrol/src/configuration"
@@ -558,4 +559,47 @@ func (client *PAClient) handleStreamUpdate() {
 
 	// Update previous IDs for next comparison
 	client.updatePreviousStreamIDs()
+}
+
+// ProcessMediaControlAction handles media control actions like play/pause
+func (client *PAClient) ProcessMediaControlAction(action configuration.Action) error {
+	switch action.Type {
+	case configuration.MediaPlayPause:
+		client.log.Info().Msg("Executing media play/pause command")
+		return client.executeMediaPlayPause()
+	default:
+		return fmt.Errorf("unsupported media control action: %s", action.Type)
+	}
+}
+
+// executeMediaPlayPause sends a media play/pause key event, simulating keyboard media key
+func (client *PAClient) executeMediaPlayPause() error {
+	// For KDE/Plasma on Wayland, use D-Bus to simulate media key press
+	// This sends the same signal that the media keys on your keyboard send
+	cmd := `dbus-send --session --type=method_call --dest=org.kde.kglobalaccel /component/mediacontrol org.kde.kglobalaccel.Component.invokeShortcut string:"playpausemedia"`
+	
+	if err := client.executeCommand(cmd); err != nil {
+		client.log.Warn().Err(err).Msg("KDE media key D-Bus call failed, trying generic MPRIS")
+		
+		// Fallback: try generic MPRIS D-Bus call to any available player
+		cmd = `dbus-send --session --type=method_call --dest=org.mpris.MediaPlayer2.Player /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.PlayPause 2>/dev/null || dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ListNames | grep -o "org\.mpris\.MediaPlayer2\.[^"]*" | head -1 | xargs -I {} dbus-send --session --type=method_call --dest={} /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.PlayPause`
+		
+		if err := client.executeCommand(cmd); err != nil {
+			client.log.Error().Err(err).Msg("All media control methods failed")
+			return fmt.Errorf("failed to send media play/pause command")
+		}
+	}
+	
+	client.log.Info().Msg("Successfully sent media play/pause key event")
+	return nil
+}
+
+// executeCommand executes a shell command
+func (client *PAClient) executeCommand(cmd string) error {
+	// Execute the command using shell
+	execCmd := exec.Command("sh", "-c", cmd)
+	if err := execCmd.Run(); err != nil {
+		return fmt.Errorf("failed to execute command: %w", err)
+	}
+	return nil
 }

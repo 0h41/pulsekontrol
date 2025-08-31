@@ -303,6 +303,12 @@ func (client *MidiClient) Run() {
 						if err := client.PAClient.SetDefaultOutput(action); err != nil {
 							client.log.Error().Err(err)
 						}
+					case configuration.MediaPlayPause:
+						if value > 0 { // Only trigger on button press, not release
+							if err := client.PAClient.ProcessMediaControlAction(action); err != nil {
+								client.log.Error().Err(err)
+							}
+						}
 					default:
 						client.log.Error().Msgf("Unknown action type %s in rule %+v", action.Type, rule)
 					}

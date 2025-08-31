@@ -337,6 +337,26 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 		}
 	}
 
+	// Add transport button rules (hardcoded for now)
+	// Play button rule - Controller 41, Channel 0 
+	playRule := configuration.Rule{
+		MidiMessage: configuration.MidiMessage{
+			DeviceName:        midiDevice.Name,
+			DeviceControlPath: "Transport/Play", 
+			Type:              configuration.ControlChange,
+			Channel:           0,
+			Controller:        41, // Play button controller number
+		},
+		Actions: []configuration.Action{
+			{
+				Type: configuration.MediaPlayPause,
+				Target: nil, // No specific target for media control
+			},
+		},
+	}
+	rules = append(rules, playRule)
+	log.Debug().Msg("Added rule for play button (Transport/Play)")
+	
 	return rules
 }
 

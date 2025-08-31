@@ -43,6 +43,7 @@ type PulseAudioActionType string
 const (
 	SetVolume        PulseAudioActionType = "SetVolume"
 	SetDefaultOutput PulseAudioActionType = "SetDefaultOutput"
+	MediaPlayPause   PulseAudioActionType = "MediaPlayPause"
 )
 
 type Target struct {
