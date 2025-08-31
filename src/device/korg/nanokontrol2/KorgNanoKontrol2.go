@@ -12,6 +12,7 @@ import (
 	"github.com/0h41/pulsekontrol/src/device/korg"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"gitlab.com/gomidi/midi/v2"
 	"gitlab.com/gomidi/midi/v2/drivers"
 	"gitlab.com/gomidi/midi/v2/sysex"
 )
@@ -376,4 +377,80 @@ func (d *KorgNanoKontrol2) UpdateRules(
 		}
 	}
 	return updatedRules
+}
+
+// EnableExternalLEDMode sends SysEx to enable external LED control
+func (d *KorgNanoKontrol2) EnableExternalLEDMode(out drivers.Out) error {
+	// SysEx command to enable external LED mode: F0 42 40 00 01 13 00 00 00 01 F7
+	sysExData := []byte{0xF0, 0x42, 0x40, 0x00, 0x01, 0x13, 0x00, 0x00, 0x00, 0x01, 0xF7}
+	
+	send, err := midi.SendTo(out)
+	if err != nil {
+		return fmt.Errorf("failed to create MIDI sender: %w", err)
+	}
+	
+	d.log.Debug().Msgf("Enabling external LED mode: % X", sysExData)
+	if err = send(sysExData); err != nil {
+		return fmt.Errorf("failed to send LED enable SysEx: %w", err)
+	}
+	
+	d.log.Info().Msg("External LED mode enabled")
+	return nil
+}
+
+// SetButtonLED controls individual button LEDs
+func (d *KorgNanoKontrol2) SetButtonLED(out drivers.Out, controller uint8, state bool) error {
+	velocity := uint8(0) // LED OFF
+	if state {
+		velocity = 127 // LED ON
+	}
+	
+	// Send Control Change message on channel 15 (0xBF)  
+	midiData := []byte{0xBF, controller, velocity}
+	
+	send, err := midi.SendTo(out)
+	if err != nil {
+		return fmt.Errorf("failed to create MIDI sender: %w", err)
+	}
+	
+	d.log.Debug().Msgf("Setting LED controller %d to %v: % X", controller, state, midiData)
+	return send(midiData)
+}
+
+// UpdateSourceIndicatorLEDs updates S/R button LEDs based on active sources
+func (d *KorgNanoKontrol2) UpdateSourceIndicatorLEDs(out drivers.Out, config configuration.Config) error {
+	// Enable external LED mode first (in case device was power cycled)
+	if err := d.EnableExternalLEDMode(out); err != nil {
+		d.log.Warn().Err(err).Msg("Failed to enable external LED mode")
+		return err
+	}
+	
+	// Check each group (1-8) for active sources
+	for groupNum := 1; groupNum <= 8; groupNum++ {
+		// Check slider (Record button LED)
+		sliderId := fmt.Sprintf("slider%d", groupNum)
+		if slider, exists := config.Controls.Sliders[sliderId]; exists && len(slider.Sources) > 0 {
+			recordController := uint8(64 + groupNum - 1) // R buttons: 64-71
+			d.SetButtonLED(out, recordController, true)
+			d.log.Debug().Msgf("Group %d slider has %d sources - turning ON Record LED (controller %d)", 
+				groupNum, len(slider.Sources), recordController)
+		} else {
+			recordController := uint8(64 + groupNum - 1)
+			d.SetButtonLED(out, recordController, false)
+		}
+		
+		// Check knob (Solo button LED) 
+		knobId := fmt.Sprintf("knob%d", groupNum)
+		if knob, exists := config.Controls.Knobs[knobId]; exists && len(knob.Sources) > 0 {
+			soloController := uint8(32 + groupNum - 1) // S buttons: 32-39
+			d.SetButtonLED(out, soloController, true)
+			d.log.Debug().Msgf("Group %d knob has %d sources - turning ON Solo LED (controller %d)", 
+				groupNum, len(knob.Sources), soloController)
+		} else {
+			soloController := uint8(32 + groupNum - 1)
+			d.SetButtonLED(out, soloController, false)
+		}
+	}
+	
+	return nil
 }

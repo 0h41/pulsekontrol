@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/samber/lo"
 	"gitlab.com/gomidi/midi/v2"
+	"gitlab.com/gomidi/midi/v2/drivers"
 
 	driver "gitlab.com/gomidi/midi/v2/drivers/portmididrv"
 )
@@ -74,6 +75,9 @@ type MidiClient struct {
 	ConfigManager  *configuration.ConfigManager
 	volumeChannels map[string]chan VolumeRequest
 	channelsMutex  sync.RWMutex
+	// LED control support
+	midiOut        drivers.Out
+	nanoDevice     *korgNanokontrol2.KorgNanoKontrol2
 }
 
 func NewMidiClient(paClient *pulseaudio.PAClient, device configuration.MidiDevice, rules []configuration.Rule, configManager *configuration.ConfigManager) *MidiClient {
@@ -216,6 +220,30 @@ func (client *MidiClient) UpdateRules(rules []configuration.Rule) {
 	// since they require hardware communication
 	client.Rules = rules
 	client.log.Info().Msg("Updated rules without requerying device")
+}
+
+// UpdateLEDIndicators updates the LED indicators based on current configuration
+func (client *MidiClient) UpdateLEDIndicators() error {
+	if client.MidiDevice.Type != configuration.KorgNanoKontrol2 {
+		return nil // Only support nanoKONTROL2
+	}
+	
+	if client.ConfigManager == nil {
+		return fmt.Errorf("no config manager available")
+	}
+	
+	if client.nanoDevice == nil || client.midiOut == nil {
+		return fmt.Errorf("MIDI device not initialized")
+	}
+	
+	config := *client.ConfigManager.GetConfig()
+	if err := client.nanoDevice.UpdateSourceIndicatorLEDs(client.midiOut, config); err != nil {
+		client.log.Error().Err(err).Msg("Failed to update LED indicators")
+		return err
+	}
+	
+	client.log.Debug().Msg("Updated LED indicators")
+	return nil
 }
 
 func (client *MidiClient) Run() {
@@ -462,6 +490,18 @@ func (client *MidiClient) Run() {
 	if client.MidiDevice.Type == configuration.KorgNanoKontrol2 {
 		device := korgNanokontrol2.New(client.MidiDevice.Name)
 		client.Rules = device.UpdateRules(client.Rules, sysExChannel, out)
+		
+		// Store references for LED control
+		client.midiOut = out
+		client.nanoDevice = device
+		
+		// Initialize LED indicators based on current configuration
+		if client.ConfigManager != nil {
+			config := *client.ConfigManager.GetConfig()
+			if err := device.UpdateSourceIndicatorLEDs(out, config); err != nil {
+				client.log.Error().Err(err).Msg("Failed to initialize LED indicators")
+			}
+		}
 	}
 
 	select {}

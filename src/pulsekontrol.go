@@ -177,6 +177,11 @@ func Run() {
 
 		// Update the MIDI client with the new rules
 		midiClient.UpdateRules(newRules)
+		
+		// Update LED indicators
+		if err := midiClient.UpdateLEDIndicators(); err != nil {
+			log.Error().Err(err).Msg("Failed to update LED indicators after source assignment")
+		}
 	})
 
 	configManager.Subscribe("source.unassigned", func(data interface{}) {
@@ -189,6 +194,11 @@ func Run() {
 
 		// Update the MIDI client with the new rules
 		midiClient.UpdateRules(newRules)
+		
+		// Update LED indicators
+		if err := midiClient.UpdateLEDIndicators(); err != nil {
+			log.Error().Err(err).Msg("Failed to update LED indicators after source unassignment")
+		}
 	})
 
 	go midiClient.Run()
