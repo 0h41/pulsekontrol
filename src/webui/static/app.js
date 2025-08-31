@@ -386,13 +386,19 @@ function renderControlWithSources(controlDiv, control, assignedSourceIds, availa
         // We need to create a placeholder with at least a name
         let sourceType = "unknown";
         let sourceName = sourceId; // Fallback to showing ID if we can't find a name
+        let sourceBinaryName = "";
         
-        // Try to extract type and name from the source ID
-        // Format is often something like "playback:Chromium"
+        // Try to extract type, name, and binaryName from the source ID
+        // Format can be "type:name" or "type:name:binaryName"
         if (sourceId.includes(':')) {
             const parts = sourceId.split(':');
             sourceType = parts[0];
-            sourceName = parts.slice(1).join(':');
+            if (parts.length >= 2) {
+                sourceName = parts[1];
+            }
+            if (parts.length >= 3) {
+                sourceBinaryName = parts[2];
+            }
         }
         
         const sourceItem = document.createElement('div');
@@ -413,10 +419,13 @@ function renderControlWithSources(controlDiv, control, assignedSourceIds, availa
         typeBadge.textContent = sourceType;
         sourceItem.appendChild(typeBadge);
         
-        // Add source name
+        // Add source name with enhanced display if binary name exists
         const sourceNameElement = document.createElement('span');
-        sourceNameElement.textContent = sourceName;
-        sourceNameElement.title = sourceName; // For tooltip on hover
+        const displayName = sourceBinaryName && sourceBinaryName !== '' 
+            ? `${sourceName} (${sourceBinaryName})` 
+            : sourceName;
+        sourceNameElement.textContent = displayName;
+        sourceNameElement.title = displayName; // For tooltip on hover
         sourceItem.appendChild(sourceNameElement);
         
         // Add missing indicator

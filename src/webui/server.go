@@ -123,7 +123,12 @@ func (s *WebUIServer) buildUIStateMessage(includeControlValues bool) ([]byte, er
 			}
 			// If source not found in current sources, create a virtual ID for it
 			if !found {
-				virtualId := fmt.Sprintf("%s:%s", source.Type, source.Name)
+				var virtualId string
+				if source.BinaryName != "" {
+					virtualId = fmt.Sprintf("%s:%s:%s", source.Type, source.Name, source.BinaryName)
+				} else {
+					virtualId = fmt.Sprintf("%s:%s", source.Type, source.Name)
+				}
 				sourceIds = append(sourceIds, virtualId)
 			}
 		}
@@ -171,7 +176,12 @@ func (s *WebUIServer) buildUIStateMessage(includeControlValues bool) ([]byte, er
 			}
 			// If source not found in current sources, create a virtual ID for it
 			if !found {
-				virtualId := fmt.Sprintf("%s:%s", source.Type, source.Name)
+				var virtualId string
+				if source.BinaryName != "" {
+					virtualId = fmt.Sprintf("%s:%s:%s", source.Type, source.Name, source.BinaryName)
+				} else {
+					virtualId = fmt.Sprintf("%s:%s", source.Type, source.Name)
+				}
 				sourceIds = append(sourceIds, virtualId)
 			}
 		}
@@ -294,8 +304,8 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			
 			if targetSource == nil {
 				// It might be a virtual ID for an inactive source
-				parts := strings.SplitN(sourceId, ":", 2)
-				if len(parts) == 2 {
+				parts := strings.SplitN(sourceId, ":", 3)
+				if len(parts) >= 2 {
 					// Cannot adjust volume of inactive sources
 					log.Warn().Str("sourceId", sourceId).Msg("Cannot adjust volume of inactive source")
 					continue
@@ -416,14 +426,19 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				s.configManager.AssignSource(controlType, controlId, configSource)
 			} else {
 				// It might be a virtual ID for an inactive source
-				parts := strings.SplitN(sourceId, ":", 2)
-				if len(parts) == 2 {
+				parts := strings.SplitN(sourceId, ":", 3)
+				if len(parts) >= 2 {
 					sourceType := parts[0]
 					sourceName := parts[1]
+					sourceBinaryName := ""
+					if len(parts) >= 3 {
+						sourceBinaryName = parts[2]
+					}
 					
 					log.Debug().
 						Str("sourceType", sourceType).
 						Str("sourceName", sourceName).
+						Str("sourceBinaryName", sourceBinaryName).
 						Msg("Assigning inactive source")
 					
 					// Convert source type to proper PulseAudioTargetType format
@@ -445,8 +460,9 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					
 					// Create configuration source
 					configSource := configuration.Source{
-						Type: targetType,
-						Name: sourceName,
+						Type:       targetType,
+						Name:       sourceName,
+						BinaryName: sourceBinaryName,
 					}
 					
 					// Update configuration
@@ -508,15 +524,20 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				)
 			} else {
 				// Source might be a virtual ID for an inactive source
-				// Parse the ID which should be in the format "type:name"
-				parts := strings.SplitN(sourceId, ":", 2)
-				if len(parts) == 2 {
+				// Parse the ID which should be in the format "type:name" or "type:name:binaryName"
+				parts := strings.SplitN(sourceId, ":", 3)
+				if len(parts) >= 2 {
 					sourceType := parts[0]
 					sourceName := parts[1]
+					sourceBinaryName := ""
+					if len(parts) >= 3 {
+						sourceBinaryName = parts[2]
+					}
 					
 					log.Debug().
 						Str("sourceType", sourceType).
 						Str("sourceName", sourceName).
+						Str("sourceBinaryName", sourceBinaryName).
 						Msg("Unassigning inactive source")
 					
 					// Convert source type to proper PulseAudioTargetType format
@@ -539,7 +560,7 @@ func (s *WebUIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					virtualSource := configuration.Source{
 						Type:       targetType,
 						Name:       sourceName,
-						BinaryName: "", // Virtual sources don't have binary name
+						BinaryName: sourceBinaryName,
 					}
 					s.configManager.UnassignSource(
 						controlType,

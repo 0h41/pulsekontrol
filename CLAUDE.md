@@ -1,5 +1,8 @@
 # PulseKontrol Development Guide
 
+Stop the user systemd service before development!
+Always describe your plan to the user before attempting to make any changes.
+
 ## Build & Run Commands
 - Build: `make`
 - Clean: `make clean`
