@@ -472,14 +472,20 @@ func (d *KorgNanoKontrol2) UpdateSourceIndicatorLEDs(out drivers.Out, config con
 
 // hasMatchingActiveStream checks if there's an active stream that matches the given source configuration
 // Uses the same logic as the web UI: exact BinaryName match when specified, legacy name match otherwise
+// LEDs only turn on for streams (PlaybackStream/RecordStream), not devices (OutputDevice/InputDevice)
 func (d *KorgNanoKontrol2) hasMatchingActiveStream(paClient *pulseaudio.PAClient, source configuration.Source) bool {
+	// Don't turn on LEDs for devices, only for streams
+	sourceTypeLower := strings.ToLower(string(source.Type))
+	if sourceTypeLower == "outputdevice" || sourceTypeLower == "inputdevice" {
+		return false
+	}
+	
 	// Get current audio sources
 	sources := paClient.GetAudioSources()
 	
 	// Use the same matching logic as the web UI server
 	for _, audioSource := range sources {
 		// Use lowercase comparison for source types
-		sourceTypeLower := strings.ToLower(string(source.Type))
 		audioSourceTypeLower := strings.ToLower(audioSource.Type)
 		
 		// For enhanced configs (with BinaryName), require exact match
