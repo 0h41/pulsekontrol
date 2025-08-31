@@ -267,7 +267,7 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 					DeviceName:        midiDevice.Name,
 					DeviceControlPath: slider.Path,
 					Type:              configuration.ControlChange,
-					Channel:           0, // Default channel
+					Channel:           15, // nanoKONTROL2 uses channel 0 in internal mode, channel 15 in external mode
 					Controller:        controller,
 				},
 				Actions: []configuration.Action{},
@@ -316,7 +316,7 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 					DeviceName:        midiDevice.Name,
 					DeviceControlPath: knob.Path,
 					Type:              configuration.ControlChange,
-					Channel:           0, // Default channel
+					Channel:           15, // nanoKONTROL2 uses channel 0 in internal mode, channel 15 in external mode
 					Controller:        controller,
 				},
 				Actions: []configuration.Action{},
@@ -348,13 +348,13 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 	}
 
 	// Add transport button rules (hardcoded for now)
-	// Play button rule - Controller 41, Channel 0 
+	// Play button rule - Controller 41, Channel 15 in external mode
 	playRule := configuration.Rule{
 		MidiMessage: configuration.MidiMessage{
 			DeviceName:        midiDevice.Name,
 			DeviceControlPath: "Transport/Play", 
 			Type:              configuration.ControlChange,
-			Channel:           0,
+			Channel:           15, // nanoKONTROL2 uses channel 0 in internal mode, channel 15 in external mode
 			Controller:        41, // Play button controller number
 		},
 		Actions: []configuration.Action{

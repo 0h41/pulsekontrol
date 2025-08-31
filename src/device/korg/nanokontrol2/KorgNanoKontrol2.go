@@ -198,7 +198,10 @@ func (d *KorgNanoKontrol2) UpdateRules(
 	// Fetch scene data from device
 	_, sceneData, err := d.sceneDumpRequestMessage(0).Send(c, out, d.log)
 	if err != nil {
-		panic(err)
+		d.log.Error().Err(err).Msg("Failed to fetch scene data from device, using defaults")
+		// Return rules unchanged if scene dump fails - this prevents crashes
+		// and allows volume control to work with the existing rule configuration
+		return rules
 	}
 	var assignTypeToMidiMessageType = func(assignType byte) configuration.MidiMessageType {
 		if assignType == 1 {
