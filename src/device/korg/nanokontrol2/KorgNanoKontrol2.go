@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/0h41/pulsekontrol/src/configuration"
 	"github.com/0h41/pulsekontrol/src/device"
@@ -438,8 +439,7 @@ func (d *KorgNanoKontrol2) UpdateSourceIndicatorLEDs(out drivers.Out, config con
 		
 		if slider, exists := config.Controls.Sliders[sliderId]; exists {
 			for _, source := range slider.Sources {
-				matchedStreams, _ := paClient.SmartMatchStreams(source.Type, source.Name)
-				if len(matchedStreams) > 0 {
+				if d.hasMatchingActiveStream(paClient, source) {
 					hasActiveStream = true
 					d.log.Debug().Msgf("Group %d slider has ACTIVE stream for source %s - turning ON Record LED", 
 						groupNum, source.Name)
@@ -456,8 +456,7 @@ func (d *KorgNanoKontrol2) UpdateSourceIndicatorLEDs(out drivers.Out, config con
 		
 		if knob, exists := config.Controls.Knobs[knobId]; exists {
 			for _, source := range knob.Sources {
-				matchedStreams, _ := paClient.SmartMatchStreams(source.Type, source.Name)
-				if len(matchedStreams) > 0 {
+				if d.hasMatchingActiveStream(paClient, source) {
 					hasActiveStream = true
 					d.log.Debug().Msgf("Group %d knob has ACTIVE stream for source %s - turning ON Solo LED", 
 						groupNum, source.Name)
@@ -469,4 +468,34 @@ func (d *KorgNanoKontrol2) UpdateSourceIndicatorLEDs(out drivers.Out, config con
 	}
 	
 	return nil
+}
+
+// hasMatchingActiveStream checks if there's an active stream that matches the given source configuration
+// Uses the same logic as the web UI: exact BinaryName match when specified, legacy name match otherwise
+func (d *KorgNanoKontrol2) hasMatchingActiveStream(paClient *pulseaudio.PAClient, source configuration.Source) bool {
+	// Get current audio sources
+	sources := paClient.GetAudioSources()
+	
+	// Use the same matching logic as the web UI server
+	for _, audioSource := range sources {
+		// Use lowercase comparison for source types
+		sourceTypeLower := strings.ToLower(string(source.Type))
+		audioSourceTypeLower := strings.ToLower(audioSource.Type)
+		
+		// For enhanced configs (with BinaryName), require exact match
+		// For legacy configs (without BinaryName), match any stream with same name/type
+		if audioSourceTypeLower == sourceTypeLower && audioSource.Name == source.Name {
+			if source.BinaryName != "" {
+				// Enhanced config: require exact BinaryName match
+				if audioSource.BinaryName == source.BinaryName {
+					return true
+				}
+			} else {
+				// Legacy config: any matching name/type
+				return true
+			}
+		}
+	}
+	
+	return false
 }
