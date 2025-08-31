@@ -207,8 +207,8 @@ func Run() {
 	// and sync initial volumes to control positions
 	triggerStartupVolumeActions(paClient, configManager)
 
-	// Set up stream monitoring for automatic volume application
-	setupStreamMonitoring(paClient, configManager)
+	// Set up stream monitoring for automatic volume application and LED updates
+	setupStreamMonitoring(paClient, configManager, midiClient)
 
 	// Set up signal handling for graceful shutdown
 	setupSignalHandling(paClient)
@@ -371,17 +371,35 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 }
 
 // setupStreamMonitoring configures automatic volume application for new streams
-func setupStreamMonitoring(paClient *pulseaudio.PAClient, configManager *configuration.ConfigManager) {
-	// Set up callback for new streams - just re-trigger all existing volume actions
+func setupStreamMonitoring(paClient *pulseaudio.PAClient, configManager *configuration.ConfigManager, midiClient *midi.MidiClient) {
+	// Set up callback for new streams - re-trigger volume actions and update LEDs
 	paClient.SetNewStreamCallback(func(stream pulseaudio.Stream, streamType configuration.PulseAudioTargetType) {
 		log.Info().
 			Str("streamName", stream.Name).
 			Str("streamBinary", stream.BinaryName).
 			Str("streamType", string(streamType)).
-			Msg("New stream detected, re-applying all volume settings")
+			Msg("New stream detected, re-applying all volume settings and updating LEDs")
 
-		// Just re-trigger the startup volume actions - this uses the exact same code path as startup
+		// Re-trigger the startup volume actions - this uses the exact same code path as startup
 		triggerStartupVolumeActions(paClient, configManager)
+		
+		// Update LED indicators to reflect current active streams
+		if err := midiClient.UpdateLEDIndicators(); err != nil {
+			log.Error().Err(err).Msg("Failed to update LED indicators after new stream detected")
+		}
+	})
+	
+	// Set up callback for removed streams - update LEDs when streams disappear
+	paClient.SetRemovedStreamCallback(func(stream pulseaudio.Stream, streamType configuration.PulseAudioTargetType) {
+		log.Info().
+			Str("streamID", stream.FullName).
+			Str("streamType", string(streamType)).
+			Msg("Stream removed, updating LEDs")
+		
+		// Update LED indicators to reflect current active streams (removed streams won't be found)
+		if err := midiClient.UpdateLEDIndicators(); err != nil {
+			log.Error().Err(err).Msg("Failed to update LED indicators after stream removed")
+		}
 	})
 
 	// Start monitoring
@@ -391,7 +409,19 @@ func setupStreamMonitoring(paClient *pulseaudio.PAClient, configManager *configu
 		return
 	}
 
-	log.Info().Msg("Stream monitoring enabled - new applications will automatically have volumes applied")
+	// Add a lightweight periodic check as fallback since PulseAudio stream removal events are unreliable
+	go func() {
+		ticker := time.NewTicker(3 * time.Second) // Check every 3 seconds - less frequent than before
+		defer ticker.Stop()
+		
+		for range ticker.C {
+			if err := midiClient.UpdateLEDIndicators(); err != nil {
+				log.Debug().Err(err).Msg("Failed to update LED indicators during periodic fallback check")
+			}
+		}
+	}()
+
+	log.Info().Msg("Stream monitoring enabled - new applications will automatically have volumes applied and LEDs updated")
 }
 
 

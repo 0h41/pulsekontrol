@@ -237,7 +237,7 @@ func (client *MidiClient) UpdateLEDIndicators() error {
 	}
 	
 	config := *client.ConfigManager.GetConfig()
-	if err := client.nanoDevice.UpdateSourceIndicatorLEDs(client.midiOut, config); err != nil {
+	if err := client.nanoDevice.UpdateSourceIndicatorLEDs(client.midiOut, config, client.PAClient); err != nil {
 		client.log.Error().Err(err).Msg("Failed to update LED indicators")
 		return err
 	}
@@ -498,7 +498,7 @@ func (client *MidiClient) Run() {
 		// Initialize LED indicators based on current configuration
 		if client.ConfigManager != nil {
 			config := *client.ConfigManager.GetConfig()
-			if err := device.UpdateSourceIndicatorLEDs(out, config); err != nil {
+			if err := device.UpdateSourceIndicatorLEDs(out, config, client.PAClient); err != nil {
 				client.log.Error().Err(err).Msg("Failed to initialize LED indicators")
 			}
 		}

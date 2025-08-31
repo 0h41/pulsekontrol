@@ -40,6 +40,7 @@ type PAClient struct {
 	previousPlaybackIDs    map[string]bool
 	previousRecordIDs      map[string]bool
 	newStreamCallback      StreamEventCallback
+	removedStreamCallback  StreamEventCallback
 	monitoringEnabled      bool
 }
 
@@ -463,6 +464,11 @@ func (client *PAClient) SetNewStreamCallback(callback StreamEventCallback) {
 	client.newStreamCallback = callback
 }
 
+// SetRemovedStreamCallback sets the callback function that will be called when streams are removed
+func (client *PAClient) SetRemovedStreamCallback(callback StreamEventCallback) {
+	client.removedStreamCallback = callback
+}
+
 // StartStreamMonitoring begins monitoring for new audio streams
 func (client *PAClient) StartStreamMonitoring() error {
 	if client.monitoringEnabled {
@@ -553,6 +559,54 @@ func (client *PAClient) handleStreamUpdate() {
 			
 			if client.newStreamCallback != nil {
 				client.newStreamCallback(stream, configuration.RecordStream)
+			}
+		}
+	}
+
+	// Check for removed playback streams
+	if client.removedStreamCallback != nil {
+		currentPlaybackIDs := make(map[string]bool)
+		for _, stream := range client.playbackStreams {
+			currentPlaybackIDs[stream.FullName] = true
+		}
+		
+		for streamID := range client.previousPlaybackIDs {
+			if !currentPlaybackIDs[streamID] {
+				client.log.Info().
+					Str("streamID", streamID).
+					Msg("Playback stream removed")
+				
+				// Create a dummy stream object for the callback (we only have the ID)
+				removedStream := Stream{
+					FullName: streamID,
+					Name:     "Unknown", // We can't recover the name after removal
+					BinaryName: "Unknown",
+				}
+				client.removedStreamCallback(removedStream, configuration.PlaybackStream)
+			}
+		}
+	}
+
+	// Check for removed record streams  
+	if client.removedStreamCallback != nil {
+		currentRecordIDs := make(map[string]bool)
+		for _, stream := range client.recordStreams {
+			currentRecordIDs[stream.FullName] = true
+		}
+		
+		for streamID := range client.previousRecordIDs {
+			if !currentRecordIDs[streamID] {
+				client.log.Info().
+					Str("streamID", streamID).
+					Msg("Record stream removed")
+				
+				// Create a dummy stream object for the callback (we only have the ID)
+				removedStream := Stream{
+					FullName: streamID,
+					Name:     "Unknown", // We can't recover the name after removal
+					BinaryName: "Unknown",
+				}
+				client.removedStreamCallback(removedStream, configuration.RecordStream)
 			}
 		}
 	}
