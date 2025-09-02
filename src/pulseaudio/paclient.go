@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/0h41/pulsekontrol/src/configuration"
+	"github.com/godbus/dbus/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/samber/lo"
@@ -31,6 +32,9 @@ type AudioSource struct {
 // StreamEventCallback is called when a new stream is detected
 type StreamEventCallback func(stream Stream, streamType configuration.PulseAudioTargetType)
 
+// MediaStatusCallback is called when media playback status changes
+type MediaStatusCallback func(isPlaying bool)
+
 type PAClient struct {
 	log                    zerolog.Logger
 	context                *pulseaudio.Client
@@ -42,6 +46,7 @@ type PAClient struct {
 	previousRecordIDs      map[string]bool
 	newStreamCallback      StreamEventCallback
 	removedStreamCallback  StreamEventCallback
+	mediaStatusCallback    MediaStatusCallback
 	monitoringEnabled      bool
 }
 
@@ -60,6 +65,7 @@ func NewPAClient() *PAClient {
 		previousPlaybackIDs:    make(map[string]bool),
 		previousRecordIDs:      make(map[string]bool),
 		newStreamCallback:      nil,
+		mediaStatusCallback:    nil,
 		monitoringEnabled:      false,
 	}
 	return client
@@ -470,6 +476,11 @@ func (client *PAClient) SetRemovedStreamCallback(callback StreamEventCallback) {
 	client.removedStreamCallback = callback
 }
 
+// SetMediaStatusCallback sets the callback function that will be called when media playback status changes
+func (client *PAClient) SetMediaStatusCallback(callback MediaStatusCallback) {
+	client.mediaStatusCallback = callback
+}
+
 // StartStreamMonitoring begins monitoring for new audio streams
 func (client *PAClient) StartStreamMonitoring() error {
 	if client.monitoringEnabled {
@@ -688,6 +699,77 @@ func (client *PAClient) IsMediaPlaying() bool {
 	
 	client.log.Debug().Msg("No playing media found")
 	return false
+}
+
+// StartMediaStatusMonitoring begins monitoring MPRIS media players for playback status changes
+func (client *PAClient) StartMediaStatusMonitoring() error {
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		return fmt.Errorf("failed to connect to session bus: %w", err)
+	}
+
+	// Monitor PropertiesChanged signals from all MPRIS media players
+	rule := "type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',path='/org/mpris/MediaPlayer2'"
+	call := conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, rule)
+	if call.Err != nil {
+		return fmt.Errorf("failed to add D-Bus match rule: %w", call.Err)
+	}
+
+	// Create channel for receiving signals
+	ch := make(chan *dbus.Signal, 10)
+	conn.Signal(ch)
+
+	// Start goroutine to handle signals
+	go func() {
+		defer conn.Close()
+		
+		var currentPlayingStatus bool
+		
+		for signal := range ch {
+			if signal.Name == "org.freedesktop.DBus.Properties.PropertiesChanged" && 
+			   len(signal.Body) >= 2 {
+				
+				// Check if this is an MPRIS player signal
+				if !strings.Contains(string(signal.Path), "/org/mpris/MediaPlayer2") {
+					continue
+				}
+				
+				// Parse the signal body
+				interfaceName, ok := signal.Body[0].(string)
+				if !ok || interfaceName != "org.mpris.MediaPlayer2.Player" {
+					continue
+				}
+				
+				properties, ok := signal.Body[1].(map[string]dbus.Variant)
+				if !ok {
+					continue
+				}
+				
+				// Check if PlaybackStatus changed
+				if statusVariant, exists := properties["PlaybackStatus"]; exists {
+					if status, ok := statusVariant.Value().(string); ok {
+						newPlayingStatus := (status == "Playing")
+						
+						// Only trigger callback if status actually changed
+						if newPlayingStatus != currentPlayingStatus {
+							currentPlayingStatus = newPlayingStatus
+							client.log.Debug().
+								Bool("isPlaying", newPlayingStatus).
+								Str("sender", string(signal.Sender)).
+								Msg("Media playback status changed")
+								
+							if client.mediaStatusCallback != nil {
+								client.mediaStatusCallback(newPlayingStatus)
+							}
+						}
+					}
+				}
+			}
+		}
+	}()
+	
+	client.log.Info().Msg("MPRIS media status monitoring started")
+	return nil
 }
 
 // executeCommand executes a shell command

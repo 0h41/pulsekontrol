@@ -401,25 +401,32 @@ func setupStreamMonitoring(paClient *pulseaudio.PAClient, configManager *configu
 			log.Error().Err(err).Msg("Failed to update LED indicators after stream removed")
 		}
 	})
+	
+	// Set up callback for media status changes - update play button LED
+	paClient.SetMediaStatusCallback(func(isPlaying bool) {
+		log.Info().
+			Bool("isPlaying", isPlaying).
+			Msg("Media status changed, updating play button LED")
+		
+		// Update only the play button LED
+		if err := midiClient.UpdatePlayButtonLED(isPlaying); err != nil {
+			log.Error().Err(err).Msg("Failed to update play button LED after media status change")
+		}
+	})
 
-	// Start monitoring
+	// Start stream monitoring
 	err := paClient.StartStreamMonitoring()
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to start stream monitoring")
 		return
 	}
-
-	// Add a lightweight periodic check as fallback since PulseAudio stream removal events are unreliable
-	go func() {
-		ticker := time.NewTicker(3 * time.Second) // Check every 3 seconds - less frequent than before
-		defer ticker.Stop()
-		
-		for range ticker.C {
-			if err := midiClient.UpdateLEDIndicators(); err != nil {
-				log.Debug().Err(err).Msg("Failed to update LED indicators during periodic fallback check")
-			}
-		}
-	}()
+	
+	// Start media status monitoring
+	err = paClient.StartMediaStatusMonitoring()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to start media status monitoring")
+		return
+	}
 
 	log.Info().Msg("Stream monitoring enabled - new applications will automatically have volumes applied and LEDs updated")
 }

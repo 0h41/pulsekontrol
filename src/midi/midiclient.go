@@ -246,6 +246,29 @@ func (client *MidiClient) UpdateLEDIndicators() error {
 	return nil
 }
 
+// UpdatePlayButtonLED updates only the play button LED based on media status
+func (client *MidiClient) UpdatePlayButtonLED(isPlaying bool) error {
+	if client.nanoDevice == nil || client.midiOut == nil {
+		return fmt.Errorf("MIDI device not initialized")
+	}
+	
+	// Enable external LED mode first (in case device was power cycled)
+	if err := client.nanoDevice.EnableExternalLEDMode(client.midiOut); err != nil {
+		client.log.Warn().Err(err).Msg("Failed to enable external LED mode for play button")
+		return err
+	}
+	
+	// Control Play button LED (controller 41) based on media status
+	playController := uint8(41) // Play button controller number
+	if err := client.nanoDevice.SetButtonLED(client.midiOut, playController, isPlaying); err != nil {
+		client.log.Error().Err(err).Msg("Failed to set play button LED")
+		return err
+	}
+	
+	client.log.Debug().Msgf("Play button LED updated: %v", isPlaying)
+	return nil
+}
+
 func (client *MidiClient) Run() {
 	drv, err := driver.New()
 	if err != nil {
