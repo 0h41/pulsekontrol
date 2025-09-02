@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"slices"
+	"strings"
 
 	"github.com/0h41/pulsekontrol/src/configuration"
 	"github.com/rs/zerolog"
@@ -646,6 +647,47 @@ func (client *PAClient) executeMediaPlayPause() error {
 	
 	client.log.Info().Msg("Successfully sent media play/pause key event")
 	return nil
+}
+
+// IsMediaPlaying checks if any media player is currently playing
+func (client *PAClient) IsMediaPlaying() bool {
+	// First, get list of available MPRIS media players
+	cmd := `dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ListNames | grep -o "org\.mpris\.MediaPlayer2\.[^\"]*"`
+	
+	execCmd := exec.Command("sh", "-c", cmd)
+	output, err := execCmd.Output()
+	if err != nil {
+		client.log.Debug().Err(err).Msg("Failed to get MPRIS players")
+		return false
+	}
+	
+	players := strings.Fields(string(output))
+	if len(players) == 0 {
+		client.log.Debug().Msg("No MPRIS players found")
+		return false
+	}
+	
+	// Check each player's playback status
+	for _, player := range players {
+		cmd := fmt.Sprintf(`dbus-send --session --print-reply --dest=%s /org/mpris/MediaPlayer2 org.freedesktop.DBus.Properties.Get string:org.mpris.MediaPlayer2.Player string:PlaybackStatus 2>/dev/null`, player)
+		
+		statusCmd := exec.Command("sh", "-c", cmd)
+		statusOutput, err := statusCmd.Output()
+		if err != nil {
+			client.log.Debug().Err(err).Msgf("Failed to get playback status for %s", player)
+			continue
+		}
+		
+		// Parse the D-Bus response to extract the status string
+		statusStr := string(statusOutput)
+		if strings.Contains(statusStr, `"Playing"`) {
+			client.log.Debug().Msgf("Found playing media in %s", player)
+			return true
+		}
+	}
+	
+	client.log.Debug().Msg("No playing media found")
+	return false
 }
 
 // executeCommand executes a shell command

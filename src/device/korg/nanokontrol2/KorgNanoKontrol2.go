@@ -467,6 +467,13 @@ func (d *KorgNanoKontrol2) UpdateSourceIndicatorLEDs(out drivers.Out, config con
 		d.SetButtonLED(out, soloController, hasActiveStream)
 	}
 	
+	// Control Play button LED (controller 41) based on system media status
+	playController := uint8(41) // Play button controller number
+	isMediaPlaying := paClient.IsMediaPlaying()
+	d.SetButtonLED(out, playController, isMediaPlaying)
+	
+	d.log.Debug().Msgf("Play button LED set to %v (media playing: %v)", isMediaPlaying, isMediaPlaying)
+	
 	return nil
 }
 
