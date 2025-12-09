@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/0h41/pulsekontrol/src/configuration"
 	"github.com/0h41/pulsekontrol/src/device"
@@ -388,19 +389,63 @@ func (d *KorgNanoKontrol2) UpdateRules(
 func (d *KorgNanoKontrol2) EnableExternalLEDMode(out drivers.Out) error {
 	// SysEx command to enable external LED mode: F0 42 40 00 01 13 00 00 00 01 F7
 	sysExData := []byte{0xF0, 0x42, 0x40, 0x00, 0x01, 0x13, 0x00, 0x00, 0x00, 0x01, 0xF7}
-	
+
 	send, err := midi.SendTo(out)
 	if err != nil {
 		return fmt.Errorf("failed to create MIDI sender: %w", err)
 	}
-	
+
 	d.log.Debug().Msgf("Enabling external LED mode: % X", sysExData)
 	if err = send(sysExData); err != nil {
 		return fmt.Errorf("failed to send LED enable SysEx: %w", err)
 	}
-	
+
 	d.log.Info().Msg("External LED mode enabled")
 	return nil
+}
+
+// EnableExternalLEDModeWithChannel enables LED mode and waits for acknowledgment via sysExChannel.
+// This variant should be used when the sysExChannel listener is active, to consume the response
+// and prevent it from interfering with subsequent SysEx operations like scene dump.
+func (d *KorgNanoKontrol2) EnableExternalLEDModeWithChannel(c chan []byte, out drivers.Out) error {
+	// SysEx command to enable external LED mode: F0 42 40 00 01 13 00 00 00 01 F7
+	sysExData := []byte{0xF0, 0x42, 0x40, 0x00, 0x01, 0x13, 0x00, 0x00, 0x00, 0x01, 0xF7}
+
+	send, err := midi.SendTo(out)
+	if err != nil {
+		return fmt.Errorf("failed to create MIDI sender: %w", err)
+	}
+
+	d.log.Debug().Msgf("Enabling external LED mode (with channel): % X", sysExData)
+	if err = send(sysExData); err != nil {
+		return fmt.Errorf("failed to send LED enable SysEx: %w", err)
+	}
+
+	// Wait for and consume the acknowledgment response
+	response := <-c
+	d.log.Debug().Msgf("LED mode enable response: % X", response)
+
+	d.log.Info().Msg("External LED mode enabled (with acknowledgment)")
+	return nil
+}
+
+// DrainSysExChannel drains any stale SysEx messages from the channel.
+// This is useful after enabling LED mode to clear any queued responses
+// from previous sessions before reading scene data.
+func (d *KorgNanoKontrol2) DrainSysExChannel(c chan []byte, timeout time.Duration) int {
+	drained := 0
+	for {
+		select {
+		case msg := <-c:
+			drained++
+			d.log.Debug().Msgf("Drained stale SysEx message #%d: % X", drained, msg)
+		case <-time.After(timeout):
+			if drained > 0 {
+				d.log.Info().Msgf("Drained %d stale SysEx message(s)", drained)
+			}
+			return drained
+		}
+	}
 }
 
 // SetButtonLED controls individual button LEDs

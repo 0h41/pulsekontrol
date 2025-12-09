@@ -512,12 +512,27 @@ func (client *MidiClient) Run() {
 	// Only support KORG nanoKONTROL2
 	if client.MidiDevice.Type == configuration.KorgNanoKontrol2 {
 		device := korgNanokontrol2.New(client.MidiDevice.Name)
-		client.Rules = device.UpdateRules(client.Rules, sysExChannel, out)
-		
+
 		// Store references for LED control
 		client.midiOut = out
 		client.nanoDevice = device
-		
+
+		// Enable external LED mode FIRST, before reading scene data.
+		// This is critical because enabling LED mode changes the device's
+		// MIDI channel from 0 to 15. If we read scene data before enabling
+		// LED mode, we get the wrong channel configuration.
+		// Use the WithChannel variant to consume the acknowledgment response.
+		if err := device.EnableExternalLEDModeWithChannel(sysExChannel, out); err != nil {
+			client.log.Warn().Err(err).Msg("Failed to enable external LED mode before scene read")
+		}
+
+		// Drain any stale SysEx messages that may have queued up from previous sessions.
+		// The device can send multiple LED mode acknowledgments if it was in an odd state.
+		device.DrainSysExChannel(sysExChannel, 100*time.Millisecond)
+
+		// Now read scene data and update rules with correct channel info
+		client.Rules = device.UpdateRules(client.Rules, sysExChannel, out)
+
 		// Initialize LED indicators based on current configuration
 		if client.ConfigManager != nil {
 			config := *client.ConfigManager.GetConfig()
