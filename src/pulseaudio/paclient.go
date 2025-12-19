@@ -638,67 +638,32 @@ func (client *PAClient) ProcessMediaControlAction(action configuration.Action) e
 	}
 }
 
-// executeMediaPlayPause sends a media play/pause key event, simulating keyboard media key
+// executeMediaPlayPause sends a media play/pause command via playerctl
 func (client *PAClient) executeMediaPlayPause() error {
-	// For KDE/Plasma on Wayland, use D-Bus to simulate media key press
-	// This sends the same signal that the media keys on your keyboard send
-	cmd := `dbus-send --session --type=method_call --dest=org.kde.kglobalaccel /component/mediacontrol org.kde.kglobalaccel.Component.invokeShortcut string:"playpausemedia"`
-	
+	cmd := "playerctl play-pause"
+
 	if err := client.executeCommand(cmd); err != nil {
-		client.log.Warn().Err(err).Msg("KDE media key D-Bus call failed, trying generic MPRIS")
-		
-		// Fallback: try generic MPRIS D-Bus call to any available player
-		cmd = `dbus-send --session --type=method_call --dest=org.mpris.MediaPlayer2.Player /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.PlayPause 2>/dev/null || dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ListNames | grep -o "org\.mpris\.MediaPlayer2\.[^"]*" | head -1 | xargs -I {} dbus-send --session --type=method_call --dest={} /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.PlayPause`
-		
-		if err := client.executeCommand(cmd); err != nil {
-			client.log.Error().Err(err).Msg("All media control methods failed")
-			return fmt.Errorf("failed to send media play/pause command")
-		}
+		client.log.Error().Err(err).Msg("playerctl play-pause failed")
+		return fmt.Errorf("failed to send media play/pause command: %w", err)
 	}
-	
-	client.log.Info().Msg("Successfully sent media play/pause key event")
+
+	client.log.Info().Msg("Successfully sent media play/pause command")
 	return nil
 }
 
 // IsMediaPlaying checks if any media player is currently playing
 func (client *PAClient) IsMediaPlaying() bool {
-	// First, get list of available MPRIS media players
-	cmd := `dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ListNames | grep -o "org\.mpris\.MediaPlayer2\.[^\"]*"`
-	
-	execCmd := exec.Command("sh", "-c", cmd)
-	output, err := execCmd.Output()
+	cmd := exec.Command("playerctl", "status")
+	output, err := cmd.Output()
 	if err != nil {
-		client.log.Debug().Err(err).Msg("Failed to get MPRIS players")
+		client.log.Debug().Err(err).Msg("playerctl status failed (no player?)")
 		return false
 	}
-	
-	players := strings.Fields(string(output))
-	if len(players) == 0 {
-		client.log.Debug().Msg("No MPRIS players found")
-		return false
-	}
-	
-	// Check each player's playback status
-	for _, player := range players {
-		cmd := fmt.Sprintf(`dbus-send --session --print-reply --dest=%s /org/mpris/MediaPlayer2 org.freedesktop.DBus.Properties.Get string:org.mpris.MediaPlayer2.Player string:PlaybackStatus 2>/dev/null`, player)
-		
-		statusCmd := exec.Command("sh", "-c", cmd)
-		statusOutput, err := statusCmd.Output()
-		if err != nil {
-			client.log.Debug().Err(err).Msgf("Failed to get playback status for %s", player)
-			continue
-		}
-		
-		// Parse the D-Bus response to extract the status string
-		statusStr := string(statusOutput)
-		if strings.Contains(statusStr, `"Playing"`) {
-			client.log.Debug().Msgf("Found playing media in %s", player)
-			return true
-		}
-	}
-	
-	client.log.Debug().Msg("No playing media found")
-	return false
+
+	status := strings.TrimSpace(string(output))
+	isPlaying := status == "Playing"
+	client.log.Debug().Str("status", status).Bool("playing", isPlaying).Msg("Media status check")
+	return isPlaying
 }
 
 // StartMediaStatusMonitoring begins monitoring MPRIS media players for playback status changes
