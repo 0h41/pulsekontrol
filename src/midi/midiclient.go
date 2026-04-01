@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
 	"github.com/0h41/pulsekontrol/src/configuration"
 	korgNanokontrol2 "github.com/0h41/pulsekontrol/src/device/korg/nanokontrol2"
 	"github.com/0h41/pulsekontrol/src/pulseaudio"
@@ -62,8 +63,8 @@ func List() {
 }
 
 type VolumeRequest struct {
-	Rule configuration.Rule
-	Value uint8
+	Rule      configuration.Rule
+	Value     uint8
 	Timestamp time.Time
 }
 
@@ -76,8 +77,8 @@ type MidiClient struct {
 	volumeChannels map[string]chan VolumeRequest
 	channelsMutex  sync.RWMutex
 	// LED control support
-	midiOut        drivers.Out
-	nanoDevice     *korgNanokontrol2.KorgNanoKontrol2
+	midiOut    drivers.Out
+	nanoDevice *korgNanokontrol2.KorgNanoKontrol2
 }
 
 func NewMidiClient(paClient *pulseaudio.PAClient, device configuration.MidiDevice, rules []configuration.Rule, configManager *configuration.ConfigManager) *MidiClient {
@@ -98,7 +99,7 @@ func (client *MidiClient) getOrCreateVolumeChannel(ruleKey string) chan VolumeRe
 	client.channelsMutex.RLock()
 	ch, exists := client.volumeChannels[ruleKey]
 	client.channelsMutex.RUnlock()
-	
+
 	if !exists {
 		client.channelsMutex.Lock()
 		// Double-check after acquiring write lock
@@ -148,7 +149,7 @@ func (client *MidiClient) processVolumeRequest(req VolumeRequest) {
 				maxValue = 0x7f
 			}
 			volumePercent := float32(req.Value) / float32(maxValue-minValue)
-			
+
 			// Better logging of volume change
 			if target, ok := action.Target.(*configuration.TypedTarget); ok {
 				client.log.Debug().
@@ -157,7 +158,7 @@ func (client *MidiClient) processVolumeRequest(req VolumeRequest) {
 					Float32("volume", volumePercent).
 					Msg("Setting volume")
 			}
-			
+
 			if err := client.PAClient.ProcessVolumeAction(action, volumePercent); err != nil {
 				client.log.Error().Err(err)
 			}
@@ -174,48 +175,100 @@ func (client *MidiClient) processVolumeRequest(req VolumeRequest) {
 	}
 }
 
+func (client *MidiClient) assignFocusedWindowPlaybackStreams(action configuration.Action) error {
+	if client.ConfigManager == nil {
+		return fmt.Errorf("no config manager available")
+	}
+
+	target, ok := action.Target.(*configuration.ControlTarget)
+	if !ok || target == nil {
+		return fmt.Errorf("invalid control target for focused window assignment")
+	}
+
+	streams, err := client.PAClient.GetFocusedWindowPlaybackStreams()
+	if err != nil {
+		return err
+	}
+
+	assignedCount := 0
+	seenSources := make(map[string]struct{})
+
+	for _, stream := range streams {
+		sourceKey := fmt.Sprintf("%s:%s", stream.Name, stream.BinaryName)
+		if _, exists := seenSources[sourceKey]; exists {
+			continue
+		}
+		seenSources[sourceKey] = struct{}{}
+
+		source := configuration.Source{
+			Type:       configuration.PlaybackStream,
+			Name:       stream.Name,
+			BinaryName: stream.BinaryName,
+		}
+
+		client.ConfigManager.AssignSource(target.ControlType, target.ControlID, source)
+		assignedCount++
+	}
+
+	if assignedCount == 0 {
+		client.log.Info().
+			Str("controlType", target.ControlType).
+			Str("controlID", target.ControlID).
+			Msg("Focused window playback streams were already assigned to control")
+		return nil
+	}
+
+	client.log.Info().
+		Str("controlType", target.ControlType).
+		Str("controlID", target.ControlID).
+		Int("matchedStreams", assignedCount).
+		Msg("Processed focused window playback streams for control")
+
+	return nil
+}
+
 // UpdateRules updates the rules for the MIDI client dynamically
 func (client *MidiClient) UpdateRules(rules []configuration.Rule) {
 	client.log.Info().Msgf("Updating MIDI rules - previous: %d, new: %d", len(client.Rules), len(rules))
-	
+
 	// Log the old rules for comparison
 	for i, rule := range client.Rules {
 		if rule.MidiMessage.DeviceControlPath != "" {
-			client.log.Debug().Msgf("OLD rule[%d]: path=%s, actions=%d", 
+			client.log.Debug().Msgf("OLD rule[%d]: path=%s, actions=%d",
 				i, rule.MidiMessage.DeviceControlPath, len(rule.Actions))
-			
+
 			// Also log controller number which is critical for matching
-			client.log.Debug().Msgf("  Controller=%d, Channel=%d", 
+			client.log.Debug().Msgf("  Controller=%d, Channel=%d",
 				rule.MidiMessage.Controller, rule.MidiMessage.Channel)
-			
+
 			for j, action := range rule.Actions {
 				if target, ok := action.Target.(*configuration.TypedTarget); ok {
-					client.log.Debug().Msgf("  OLD action[%d]: type=%s, target=%s:%s", 
+					client.log.Debug().Msgf("  OLD action[%d]: type=%s, target=%s:%s",
 						j, action.Type, target.Type, target.Name)
 				}
 			}
 		}
 	}
-	
+
 	// Log the new rules
 	for i, rule := range rules {
 		if rule.MidiMessage.DeviceControlPath != "" {
-			client.log.Debug().Msgf("NEW rule[%d]: path=%s, actions=%d", 
+			client.log.Debug().Msgf("NEW rule[%d]: path=%s, actions=%d",
 				i, rule.MidiMessage.DeviceControlPath, len(rule.Actions))
-			
+
 			// Also log controller number which is critical for matching
-			client.log.Debug().Msgf("  Controller=%d, Channel=%d", 
+			client.log.Debug().Msgf("  Controller=%d, Channel=%d",
 				rule.MidiMessage.Controller, rule.MidiMessage.Channel)
-			
+
 			for j, action := range rule.Actions {
 				if target, ok := action.Target.(*configuration.TypedTarget); ok {
-					client.log.Debug().Msgf("  NEW action[%d]: type=%s, target=%s:%s", 
+					client.log.Debug().Msgf("  NEW action[%d]: type=%s, target=%s:%s",
 						j, action.Type, target.Type, target.Name)
 				}
 			}
 		}
 	}
-	
+
 	// Just assign the new rules directly without device-specific updates
 	// since they require hardware communication
 	client.Rules = rules
@@ -227,21 +280,21 @@ func (client *MidiClient) UpdateLEDIndicators() error {
 	if client.MidiDevice.Type != configuration.KorgNanoKontrol2 {
 		return nil // Only support nanoKONTROL2
 	}
-	
+
 	if client.ConfigManager == nil {
 		return fmt.Errorf("no config manager available")
 	}
-	
+
 	if client.nanoDevice == nil || client.midiOut == nil {
 		return fmt.Errorf("MIDI device not initialized")
 	}
-	
+
 	config := *client.ConfigManager.GetConfig()
 	if err := client.nanoDevice.UpdateSourceIndicatorLEDs(client.midiOut, config, client.PAClient); err != nil {
 		client.log.Error().Err(err).Msg("Failed to update LED indicators")
 		return err
 	}
-	
+
 	client.log.Debug().Msg("Updated LED indicators")
 	return nil
 }
@@ -251,28 +304,28 @@ func (client *MidiClient) UpdatePlayButtonLED(isPlaying bool) error {
 	if client.nanoDevice == nil || client.midiOut == nil {
 		return fmt.Errorf("MIDI device not initialized")
 	}
-	
+
 	// Enable external LED mode first (in case device was power cycled)
 	if err := client.nanoDevice.EnableExternalLEDMode(client.midiOut); err != nil {
 		client.log.Warn().Err(err).Msg("Failed to enable external LED mode for play button")
 		return err
 	}
-	
+
 	// Control Play button LED (controller 41) based on media status
 	playController := uint8(41) // Play button controller number
 	if err := client.nanoDevice.SetButtonLED(client.midiOut, playController, isPlaying); err != nil {
 		client.log.Error().Err(err).Msg("Failed to set play button LED")
 		return err
 	}
-	
+
 	client.log.Debug().Msgf("Play button LED updated: %v", isPlaying)
 	return nil
 }
 
-func (client *MidiClient) Run() {
+func (client *MidiClient) Run() error {
 	drv, err := driver.New()
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("failed to create MIDI driver: %w", err)
 	}
 
 	// make sure to close all open ports at the end
@@ -280,18 +333,18 @@ func (client *MidiClient) Run() {
 
 	in, err := midi.FindInPort(client.MidiDevice.MidiInName)
 	if err != nil {
-		// panic(err)
 		client.log.Error().Msgf("Could not find MIDI In %s", client.MidiDevice.MidiInName)
+		return fmt.Errorf("could not find MIDI In %s: %w", client.MidiDevice.MidiInName, err)
 	}
 
 	out, err := midi.FindOutPort(client.MidiDevice.MidiOutName)
 	if err != nil {
-		// panic(err)
-		client.log.Error().Msgf("Could not find MIDI Out %s", client.MidiDevice.MidiInName)
+		client.log.Error().Msgf("Could not find MIDI Out %s", client.MidiDevice.MidiOutName)
+		return fmt.Errorf("could not find MIDI Out %s: %w", client.MidiDevice.MidiOutName, err)
 	}
 
 	if in == nil || out == nil {
-		return
+		return fmt.Errorf("MIDI ports are nil")
 	}
 
 	if err := in.Open(); err != nil {
@@ -308,7 +361,7 @@ func (client *MidiClient) Run() {
 	onMessage := func(sysExChannel chan []byte) func(msg midi.Message, timestampMs int32) {
 		var doActions = func(rule configuration.Rule, value uint8) {
 			client.log.Debug().Msgf("Received action for rule: %s", rule.MidiMessage.DeviceControlPath)
-			
+
 			// Check if this rule has volume actions
 			hasVolumeAction := false
 			for _, action := range rule.Actions {
@@ -317,18 +370,18 @@ func (client *MidiClient) Run() {
 					break
 				}
 			}
-			
+
 			if hasVolumeAction {
 				// Send to volume channel for coalescing
 				ruleKey := rule.MidiMessage.DeviceControlPath
 				ch := client.getOrCreateVolumeChannel(ruleKey)
-				
+
 				req := VolumeRequest{
 					Rule:      rule,
 					Value:     value,
 					Timestamp: time.Now(),
 				}
-				
+
 				// Non-blocking send - if channel is full, replace with latest value
 				select {
 				case ch <- req:
@@ -360,6 +413,12 @@ func (client *MidiClient) Run() {
 								client.log.Error().Err(err)
 							}
 						}
+					case configuration.AssignFocusedWindowPlaybackStreams:
+						if value > 0 { // Only trigger on button press, not release
+							if err := client.assignFocusedWindowPlaybackStreams(action); err != nil {
+								client.log.Error().Err(err).Msg("Failed to assign focused window playback streams")
+							}
+						}
 					default:
 						client.log.Error().Msgf("Unknown action type %s in rule %+v", action.Type, rule)
 					}
@@ -374,24 +433,24 @@ func (client *MidiClient) Run() {
 				var note uint8
 				var velocity uint8
 				message.GetNoteOn(&channel, &note, &velocity)
-				
-				client.log.Debug().Msgf("Note message: channel=%d, note=%d, velocity=%d", 
+
+				client.log.Debug().Msgf("Note message: channel=%d, note=%d, velocity=%d",
 					channel, note, velocity)
-				
+
 				rules := lo.Filter(client.Rules, func(rule configuration.Rule, i int) bool {
 					match := rule.MidiMessage.Type == configuration.Note &&
 						rule.MidiMessage.Channel == channel &&
 						rule.MidiMessage.Note == note
-						
+
 					if match {
 						client.log.Debug().Msgf("MATCHED note rule: %s", rule.MidiMessage.DeviceControlPath)
 					}
-					
+
 					return match
 				})
-				
+
 				client.log.Debug().Msgf("Found %d matching note rules", len(rules))
-				
+
 				for _, rule := range rules {
 					doActions(rule, velocity)
 				}
@@ -400,19 +459,19 @@ func (client *MidiClient) Run() {
 				var controller uint8
 				var ccValue uint8
 				message.GetControlChange(&channel, &controller, &ccValue)
-				
+
 				// Log more details about the MIDI message
-				client.log.Debug().Msgf("CC message: channel=%d, controller=%d, value=%d", 
+				client.log.Debug().Msgf("CC message: channel=%d, controller=%d, value=%d",
 					channel, controller, ccValue)
-				
+
 				// Show all rules for debugging
 				client.log.Debug().Msgf("Looking for matching rules among %d rules", len(client.Rules))
-				
+
 				rules := lo.Filter(client.Rules, func(rule configuration.Rule, i int) bool {
 					match := rule.MidiMessage.Type == configuration.ControlChange &&
 						rule.MidiMessage.Channel == channel &&
 						rule.MidiMessage.Controller == controller
-					
+
 					// Additional detailed logging
 					if rule.MidiMessage.DeviceControlPath != "" {
 						if match {
@@ -433,52 +492,52 @@ func (client *MidiClient) Run() {
 								Msg("Rule did NOT match")
 						}
 					}
-					
+
 					return match
 				})
-				
+
 				client.log.Debug().Msgf("Found %d matching CC rules", len(rules))
-				
+
 				// First, update config values for sliders and knobs
 				if client.ConfigManager != nil {
 					// Convert 0-127 MIDI value to 0-100 percentage
 					value := int((float64(ccValue) / 127.0) * 100.0)
-					
+
 					// Directly map controller numbers for the nanoKONTROL2
 					// This is more reliable than trying to match rules
 					if client.MidiDevice.Type == configuration.KorgNanoKontrol2 {
 						// Standard mapping for nanoKONTROL2 in default mode
 						// For sliders: controllers 0-7 correspond to sliders 1-8
 						// For knobs: controllers 16-23 correspond to knobs 1-8
-						
+
 						if controller >= 0 && controller <= 7 {
 							// This is a slider (0-7 → slider1-8)
 							groupNumber := controller + 1
 							controlId := fmt.Sprintf("slider%d", groupNumber)
-							
+
 							client.log.Debug().
 								Str("controlId", controlId).
 								Str("controlType", "slider").
 								Int("value", value).
 								Msg("Updating slider value from MIDI via direct mapping")
-							
+
 							client.ConfigManager.UpdateControlValue("slider", controlId, value)
 						} else if controller >= 16 && controller <= 23 {
 							// This is a knob (16-23 → knob1-8)
 							groupNumber := controller - 16 + 1
 							controlId := fmt.Sprintf("knob%d", groupNumber)
-							
+
 							client.log.Debug().
 								Str("controlId", controlId).
 								Str("controlType", "knob").
 								Int("value", value).
 								Msg("Updating knob value from MIDI via direct mapping")
-							
+
 							client.ConfigManager.UpdateControlValue("knob", controlId, value)
 						}
 					}
 				}
-				
+
 				// Then, perform actions based on rules
 				for _, rule := range rules {
 					doActions(rule, ccValue)

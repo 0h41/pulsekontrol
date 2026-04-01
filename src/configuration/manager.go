@@ -20,6 +20,11 @@ type ConfigManager struct {
 	subscribers   map[string][]func(interface{})
 }
 
+type sourceAssignment struct {
+	controlType string
+	controlID   string
+}
+
 // NewConfigManager creates a new configuration manager with the loaded configuration
 func NewConfigManager(config Config, configPath string) *ConfigManager {
 	return &ConfigManager{
@@ -146,46 +151,53 @@ func (cm *ConfigManager) AssignSource(controlType string, controlId string, sour
 	cm.saveMutex.Lock()
 	defer cm.saveMutex.Unlock()
 
-	var currentValue int = 0
-	
+	var currentValue int
+	var assigned bool
+
+	removedAssignments := cm.removeSourceFromOtherControls(controlType, controlId, source)
+
 	switch controlType {
 	case "slider":
 		if slider, ok := cm.config.Controls.Sliders[controlId]; ok {
-			// Check if source is already assigned to this control
-			for _, existingSource := range slider.Sources {
-				if existingSource.Type == source.Type && existingSource.Name == source.Name && existingSource.BinaryName == source.BinaryName {
-					// Already assigned, do nothing
-					return
-				}
-			}
-			// Add the source
-			slider.Sources = append(slider.Sources, source)
-			cm.config.Controls.Sliders[controlId] = slider
 			currentValue = slider.Value
+			if !containsSource(slider.Sources, source) {
+				slider.Sources = append(slider.Sources, source)
+				cm.config.Controls.Sliders[controlId] = slider
+				assigned = true
+			}
 		}
 	case "knob":
 		if knob, ok := cm.config.Controls.Knobs[controlId]; ok {
-			// Check if source is already assigned to this control
-			for _, existingSource := range knob.Sources {
-				if existingSource.Type == source.Type && existingSource.Name == source.Name && existingSource.BinaryName == source.BinaryName {
-					// Already assigned, do nothing
-					return
-				}
-			}
-			// Add the source
-			knob.Sources = append(knob.Sources, source)
-			cm.config.Controls.Knobs[controlId] = knob
 			currentValue = knob.Value
+			if !containsSource(knob.Sources, source) {
+				knob.Sources = append(knob.Sources, source)
+				cm.config.Controls.Knobs[controlId] = knob
+				assigned = true
+			}
 		}
 	}
 
-	// Notify subscribers
-	cm.Notify("source.assigned", map[string]interface{}{
-		"controlType": controlType,
-		"controlId":   controlId,
-		"source":      source,
-		"initialValue": currentValue, // Include the current value for immediate volume setting
-	})
+	if !assigned && len(removedAssignments) == 0 {
+		return
+	}
+
+	for _, removed := range removedAssignments {
+		cm.Notify("source.unassigned", map[string]interface{}{
+			"controlType": removed.controlType,
+			"controlId":   removed.controlID,
+			"sourceType":  source.Type,
+			"sourceName":  source.Name,
+		})
+	}
+
+	if assigned {
+		cm.Notify("source.assigned", map[string]interface{}{
+			"controlType":  controlType,
+			"controlId":    controlId,
+			"source":       source,
+			"initialValue": currentValue, // Include the current value for immediate volume setting
+		})
+	}
 
 	// Schedule save
 	cm.SaveWithDebounce()
@@ -196,31 +208,31 @@ func (cm *ConfigManager) UnassignSource(controlType string, controlId string, so
 	cm.saveMutex.Lock()
 	defer cm.saveMutex.Unlock()
 
+	removed := false
+
 	switch controlType {
 	case "slider":
 		if slider, ok := cm.config.Controls.Sliders[controlId]; ok {
-			// Filter out the source to remove
-			var updatedSources []Source
-			for _, existingSource := range slider.Sources {
-				if !(existingSource.Type == source.Type && existingSource.Name == source.Name && existingSource.BinaryName == source.BinaryName) {
-					updatedSources = append(updatedSources, existingSource)
-				}
+			filteredSources, wasRemoved := filterSource(slider.Sources, source)
+			if wasRemoved {
+				slider.Sources = filteredSources
+				cm.config.Controls.Sliders[controlId] = slider
+				removed = true
 			}
-			slider.Sources = updatedSources
-			cm.config.Controls.Sliders[controlId] = slider
 		}
 	case "knob":
 		if knob, ok := cm.config.Controls.Knobs[controlId]; ok {
-			// Filter out the source to remove
-			var updatedSources []Source
-			for _, existingSource := range knob.Sources {
-				if !(existingSource.Type == source.Type && existingSource.Name == source.Name && existingSource.BinaryName == source.BinaryName) {
-					updatedSources = append(updatedSources, existingSource)
-				}
+			filteredSources, wasRemoved := filterSource(knob.Sources, source)
+			if wasRemoved {
+				knob.Sources = filteredSources
+				cm.config.Controls.Knobs[controlId] = knob
+				removed = true
 			}
-			knob.Sources = updatedSources
-			cm.config.Controls.Knobs[controlId] = knob
 		}
+	}
+
+	if !removed {
+		return
 	}
 
 	// Notify subscribers
@@ -235,6 +247,73 @@ func (cm *ConfigManager) UnassignSource(controlType string, controlId string, so
 	cm.SaveWithDebounce()
 }
 
+func (cm *ConfigManager) removeSourceFromOtherControls(targetControlType string, targetControlID string, source Source) []sourceAssignment {
+	var removedAssignments []sourceAssignment
+
+	for controlID, slider := range cm.config.Controls.Sliders {
+		if targetControlType == "slider" && targetControlID == controlID {
+			continue
+		}
+
+		filteredSources, removed := filterSource(slider.Sources, source)
+		if !removed {
+			continue
+		}
+
+		slider.Sources = filteredSources
+		cm.config.Controls.Sliders[controlID] = slider
+		removedAssignments = append(removedAssignments, sourceAssignment{
+			controlType: "slider",
+			controlID:   controlID,
+		})
+	}
+
+	for controlID, knob := range cm.config.Controls.Knobs {
+		if targetControlType == "knob" && targetControlID == controlID {
+			continue
+		}
+
+		filteredSources, removed := filterSource(knob.Sources, source)
+		if !removed {
+			continue
+		}
+
+		knob.Sources = filteredSources
+		cm.config.Controls.Knobs[controlID] = knob
+		removedAssignments = append(removedAssignments, sourceAssignment{
+			controlType: "knob",
+			controlID:   controlID,
+		})
+	}
+
+	return removedAssignments
+}
+
+func containsSource(sources []Source, target Source) bool {
+	for _, source := range sources {
+		if source == target {
+			return true
+		}
+	}
+
+	return false
+}
+
+func filterSource(sources []Source, target Source) ([]Source, bool) {
+	filteredSources := make([]Source, 0, len(sources))
+	removed := false
+
+	for _, source := range sources {
+		if source == target {
+			removed = true
+			continue
+		}
+		filteredSources = append(filteredSources, source)
+	}
+
+	return filteredSources, removed
+}
+
 // MigrateSourceBinaryName updates an existing source to include binary name for specificity
 func (cm *ConfigManager) MigrateSourceBinaryName(controlType string, controlId string, sourceType PulseAudioTargetType, sourceName string, binaryName string) {
 	// First unassign the old source (without binary name)
@@ -244,15 +323,15 @@ func (cm *ConfigManager) MigrateSourceBinaryName(controlType string, controlId s
 		BinaryName: "", // Legacy source without binary name
 	}
 	cm.UnassignSource(controlType, controlId, oldSource)
-	
-	// Then assign the new source (with binary name)  
+
+	// Then assign the new source (with binary name)
 	newSource := Source{
 		Type:       sourceType,
 		Name:       sourceName,
 		BinaryName: binaryName,
 	}
 	cm.AssignSource(controlType, controlId, newSource)
-	
+
 	log.Info().
 		Str("controlType", controlType).
 		Str("sourceName", sourceName).

@@ -41,9 +41,10 @@ type MidiMessage struct {
 type PulseAudioActionType string
 
 const (
-	SetVolume        PulseAudioActionType = "SetVolume"
-	SetDefaultOutput PulseAudioActionType = "SetDefaultOutput"
-	MediaPlayPause   PulseAudioActionType = "MediaPlayPause"
+	SetVolume                          PulseAudioActionType = "SetVolume"
+	SetDefaultOutput                   PulseAudioActionType = "SetDefaultOutput"
+	MediaPlayPause                     PulseAudioActionType = "MediaPlayPause"
+	AssignFocusedWindowPlaybackStreams PulseAudioActionType = "AssignFocusedWindowPlaybackStreams"
 )
 
 type Target struct {
@@ -104,6 +105,12 @@ const (
 // ButtonTarget is the target for button actions
 type ButtonTarget struct {
 	Name string `yaml:"name"`
+}
+
+// ControlTarget identifies a slider or knob in the runtime configuration.
+type ControlTarget struct {
+	ControlType string
+	ControlID   string
 }
 
 // SliderConfig represents a slider on the MIDI controller

@@ -1,10 +1,15 @@
 package pulseaudio
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/0h41/pulsekontrol/src/configuration"
 	"github.com/godbus/dbus/v5"
@@ -18,6 +23,8 @@ type Stream struct {
 	Name       string
 	FullName   string
 	BinaryName string
+	MediaName  string
+	ProcessID  int
 	paStream   interface{}
 }
 
@@ -29,6 +36,17 @@ type AudioSource struct {
 	Volume     int    `json:"volume"`
 }
 
+type focusedWindow struct {
+	Title string `json:"title"`
+	AppID string `json:"app_id"`
+	PID   int    `json:"pid"`
+}
+
+type scoredStream struct {
+	stream Stream
+	score  int
+}
+
 // StreamEventCallback is called when a new stream is detected
 type StreamEventCallback func(stream Stream, streamType configuration.PulseAudioTargetType)
 
@@ -36,18 +54,18 @@ type StreamEventCallback func(stream Stream, streamType configuration.PulseAudio
 type MediaStatusCallback func(isPlaying bool)
 
 type PAClient struct {
-	log                    zerolog.Logger
-	context                *pulseaudio.Client
-	outputs                []Stream
-	playbackStreams        []Stream
-	inputs                 []Stream
-	recordStreams          []Stream
-	previousPlaybackIDs    map[string]bool
-	previousRecordIDs      map[string]bool
-	newStreamCallback      StreamEventCallback
-	removedStreamCallback  StreamEventCallback
-	mediaStatusCallback    MediaStatusCallback
-	monitoringEnabled      bool
+	log                   zerolog.Logger
+	context               *pulseaudio.Client
+	outputs               []Stream
+	playbackStreams       []Stream
+	inputs                []Stream
+	recordStreams         []Stream
+	previousPlaybackIDs   map[string]bool
+	previousRecordIDs     map[string]bool
+	newStreamCallback     StreamEventCallback
+	removedStreamCallback StreamEventCallback
+	mediaStatusCallback   MediaStatusCallback
+	monitoringEnabled     bool
 }
 
 func NewPAClient() *PAClient {
@@ -56,17 +74,17 @@ func NewPAClient() *PAClient {
 		panic(err)
 	}
 	client := &PAClient{
-		log:                    log.With().Str("module", "PulseAudio").Logger(),
-		context:                context,
-		outputs:                []Stream{},
-		playbackStreams:        []Stream{},
-		inputs:                 []Stream{},
-		recordStreams:          []Stream{},
-		previousPlaybackIDs:    make(map[string]bool),
-		previousRecordIDs:      make(map[string]bool),
-		newStreamCallback:      nil,
-		mediaStatusCallback:    nil,
-		monitoringEnabled:      false,
+		log:                 log.With().Str("module", "PulseAudio").Logger(),
+		context:             context,
+		outputs:             []Stream{},
+		playbackStreams:     []Stream{},
+		inputs:              []Stream{},
+		recordStreams:       []Stream{},
+		previousPlaybackIDs: make(map[string]bool),
+		previousRecordIDs:   make(map[string]bool),
+		newStreamCallback:   nil,
+		mediaStatusCallback: nil,
+		monitoringEnabled:   false,
 	}
 	return client
 }
@@ -141,6 +159,70 @@ func (client *PAClient) GetAudioSources() []AudioSource {
 	return sources
 }
 
+// GetFocusedWindowPlaybackStreams returns active playback streams that best match the focused niri window.
+func (client *PAClient) GetFocusedWindowPlaybackStreams() ([]Stream, error) {
+	window, err := getFocusedWindow()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := client.refreshStreams(); err != nil {
+		return nil, err
+	}
+
+	matches := make([]scoredStream, 0, len(client.playbackStreams))
+	for _, stream := range client.playbackStreams {
+		score := scoreFocusedWindowPlaybackStream(window, stream)
+		if score < 60 {
+			continue
+		}
+
+		client.log.Debug().
+			Str("windowTitle", window.Title).
+			Str("windowAppID", window.AppID).
+			Int("windowPID", window.PID).
+			Str("streamName", stream.Name).
+			Str("streamMediaName", stream.MediaName).
+			Str("streamBinaryName", stream.BinaryName).
+			Int("streamPID", stream.ProcessID).
+			Int("score", score).
+			Msg("Focused window playback stream candidate")
+
+		matches = append(matches, scoredStream{
+			stream: stream,
+			score:  score,
+		})
+	}
+
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no playback streams matched focused window %q (%s)", window.Title, window.AppID)
+	}
+
+	sort.SliceStable(matches, func(i, j int) bool {
+		return matches[i].score > matches[j].score
+	})
+
+	cutoff := matches[0].score - 10
+	if cutoff < 60 {
+		cutoff = 60
+	}
+
+	result := make([]Stream, 0, len(matches))
+	seen := make(map[string]struct{})
+	for _, match := range matches {
+		if match.score < cutoff {
+			break
+		}
+		if _, exists := seen[match.stream.FullName]; exists {
+			continue
+		}
+		seen[match.stream.FullName] = struct{}{}
+		result = append(result, match.stream)
+	}
+
+	return result, nil
+}
+
 func (client *PAClient) List() {
 	client.refreshStreams()
 	// List sinks
@@ -172,7 +254,7 @@ func (client *PAClient) List() {
 // ListDetailed shows detailed information about streams including all properties
 func (client *PAClient) ListDetailed() {
 	client.refreshStreams()
-	
+
 	// List detailed playback streams
 	client.log.Info().Msg("=== Detailed Playback Streams ===")
 	lo.ForEach(client.playbackStreams, func(stream Stream, i int) {
@@ -189,7 +271,7 @@ func (client *PAClient) ListDetailed() {
 			client.log.Info().Msg("---")
 		}
 	})
-	
+
 	// Also list other types with basic info for completeness
 	if len(client.outputs) > 0 {
 		client.log.Info().Msg("=== Output Devices ===")
@@ -197,14 +279,14 @@ func (client *PAClient) ListDetailed() {
 			client.log.Info().Msgf("Device %d: %s (ID: %s)", i+1, stream.Name, stream.FullName)
 		})
 	}
-	
+
 	if len(client.inputs) > 0 {
 		client.log.Info().Msg("=== Input Devices ===")
 		lo.ForEach(client.inputs, func(stream Stream, i int) {
 			client.log.Info().Msgf("Device %d: %s (ID: %s)", i+1, stream.Name, stream.FullName)
 		})
 	}
-	
+
 	if len(client.recordStreams) > 0 {
 		client.log.Info().Msg("=== Record Streams ===")
 		lo.ForEach(client.recordStreams, func(stream Stream, i int) {
@@ -258,18 +340,22 @@ func (client *PAClient) refreshStreams() error {
 			name = sinkInput.PropList["media.name"]
 		}
 		binaryName := sinkInput.PropList["application.process.binary"]
-		
+		mediaName := sinkInput.PropList["media.name"]
+		processID := parseProcessID(sinkInput.PropList["application.process.id"])
+
 		// Create unique ID by combining stream restore ID with object ID
 		objectId := sinkInput.PropList["object.id"]
 		uniqueId := sinkInput.PropList["module-stream-restore.id"]
 		if objectId != "" {
 			uniqueId = uniqueId + ":" + objectId
 		}
-		
+
 		return Stream{
 			Name:       name,
 			FullName:   uniqueId,
 			BinaryName: binaryName,
+			MediaName:  mediaName,
+			ProcessID:  processID,
 			paStream:   sinkInput,
 		}
 	})
@@ -285,34 +371,270 @@ func (client *PAClient) refreshStreams() error {
 			name = sourceOutput.PropList["media.name"]
 		}
 		binaryName := sourceOutput.PropList["application.process.binary"]
-		
+		mediaName := sourceOutput.PropList["media.name"]
+		processID := parseProcessID(sourceOutput.PropList["application.process.id"])
+
 		// Create unique ID by combining stream restore ID with object ID
 		objectId := sourceOutput.PropList["object.id"]
 		uniqueId := sourceOutput.PropList["module-stream-restore.id"]
 		if objectId != "" {
 			uniqueId = uniqueId + ":" + objectId
 		}
-		
+
 		return Stream{
 			Name:       name,
 			FullName:   uniqueId,
 			BinaryName: binaryName,
+			MediaName:  mediaName,
+			ProcessID:  processID,
 			paStream:   sourceOutput,
 		}
 	})
 	return nil
 }
 
+func getFocusedWindow() (focusedWindow, error) {
+	cmd := exec.Command("niri", "msg", "--json", "focused-window")
+	output, err := cmd.Output()
+	if err != nil {
+		return focusedWindow{}, fmt.Errorf("failed to query focused niri window: %w", err)
+	}
+
+	var window focusedWindow
+	if err := json.Unmarshal(output, &window); err != nil {
+		return focusedWindow{}, fmt.Errorf("failed to parse focused niri window: %w", err)
+	}
+
+	if window.Title == "" && window.AppID == "" && window.PID == 0 {
+		return focusedWindow{}, fmt.Errorf("niri returned an empty focused window")
+	}
+
+	return window, nil
+}
+
+func parseProcessID(value string) int {
+	if value == "" {
+		return 0
+	}
+
+	processID, err := strconv.Atoi(value)
+	if err != nil {
+		return 0
+	}
+
+	return processID
+}
+
+func scoreFocusedWindowPlaybackStream(window focusedWindow, stream Stream) int {
+	windowTitle := normalizeMatchString(window.Title)
+	windowAppID := normalizeMatchString(window.AppID)
+	streamName := normalizeMatchString(stream.Name)
+	streamMediaName := normalizeMatchString(stream.MediaName)
+	streamBinaryName := normalizeMatchString(stream.BinaryName)
+
+	score := 0
+
+	if processIDsRelated(window.PID, stream.ProcessID) {
+		score = max(score, 100)
+	}
+
+	if hasExactMatch(windowTitle, streamName, streamMediaName) {
+		score = max(score, 90)
+	} else if hasContainsMatch(windowTitle, streamName, streamMediaName) {
+		score = max(score, 78)
+	}
+
+	if hasExactMatch(windowAppID, streamName, streamBinaryName, streamMediaName) {
+		score = max(score, 88)
+	} else if hasContainsMatch(windowAppID, streamName, streamBinaryName, streamMediaName) {
+		score = max(score, 76)
+	}
+
+	if hasTokenIntersection(extractMeaningfulTokens(window.Title), extractMeaningfulTokens(stream.Name, stream.MediaName)) {
+		score = max(score, 74)
+	}
+
+	if hasTokenIntersection(extractMeaningfulTokens(window.AppID), extractMeaningfulTokens(stream.Name, stream.BinaryName, stream.MediaName)) {
+		score = max(score, 80)
+	}
+
+	return score
+}
+
+func processIDsRelated(windowPID int, streamPID int) bool {
+	if windowPID <= 0 || streamPID <= 0 {
+		return false
+	}
+
+	if windowPID == streamPID {
+		return true
+	}
+
+	windowAncestors := readAncestorPIDs(windowPID)
+	if _, ok := windowAncestors[streamPID]; ok {
+		return true
+	}
+
+	streamAncestors := readAncestorPIDs(streamPID)
+	if _, ok := streamAncestors[windowPID]; ok {
+		return true
+	}
+
+	return false
+}
+
+func readAncestorPIDs(pid int) map[int]struct{} {
+	ancestors := make(map[int]struct{})
+	currentPID := pid
+
+	for currentPID > 1 {
+		parentPID, err := readParentPID(currentPID)
+		if err != nil || parentPID <= 0 {
+			break
+		}
+
+		if _, exists := ancestors[parentPID]; exists {
+			break
+		}
+
+		ancestors[parentPID] = struct{}{}
+		currentPID = parentPID
+	}
+
+	return ancestors
+}
+
+func readParentPID(pid int) (int, error) {
+	statusPath := fmt.Sprintf("/proc/%d/status", pid)
+	statusData, err := os.ReadFile(statusPath)
+	if err != nil {
+		return 0, err
+	}
+
+	for _, line := range strings.Split(string(statusData), "\n") {
+		if !strings.HasPrefix(line, "PPid:\t") {
+			continue
+		}
+
+		parentPID, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "PPid:\t")))
+		if err != nil {
+			return 0, err
+		}
+
+		return parentPID, nil
+	}
+
+	return 0, fmt.Errorf("parent pid not found for %d", pid)
+}
+
+func hasExactMatch(reference string, candidates ...string) bool {
+	if reference == "" {
+		return false
+	}
+
+	for _, candidate := range candidates {
+		if candidate != "" && candidate == reference {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hasContainsMatch(reference string, candidates ...string) bool {
+	if len(reference) < 4 {
+		return false
+	}
+
+	for _, candidate := range candidates {
+		if len(candidate) < 4 {
+			continue
+		}
+
+		if strings.Contains(candidate, reference) || strings.Contains(reference, candidate) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hasTokenIntersection(a map[string]struct{}, b map[string]struct{}) bool {
+	for token := range a {
+		if _, ok := b[token]; ok {
+			return true
+		}
+	}
+
+	return false
+}
+
+func extractMeaningfulTokens(values ...string) map[string]struct{} {
+	tokens := make(map[string]struct{})
+
+	for _, value := range values {
+		for _, token := range strings.Fields(normalizeMatchString(value)) {
+			if shouldIgnoreToken(token) {
+				continue
+			}
+			tokens[token] = struct{}{}
+		}
+	}
+
+	return tokens
+}
+
+func shouldIgnoreToken(token string) bool {
+	if len(token) < 3 {
+		return true
+	}
+
+	switch token {
+	case "app", "audio", "bin", "com", "desktop", "exe", "input", "media", "net", "org", "output", "stable", "stream":
+		return true
+	}
+
+	for _, r := range token {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func normalizeMatchString(value string) string {
+	value = strings.ToLower(value)
+
+	var builder strings.Builder
+	lastWasSeparator := true
+
+	for _, r := range value {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			builder.WriteRune(r)
+			lastWasSeparator = false
+			continue
+		}
+
+		if !lastWasSeparator {
+			builder.WriteRune(' ')
+			lastWasSeparator = true
+		}
+	}
+
+	return strings.TrimSpace(builder.String())
+}
+
 // SmartMatchStreams is a public wrapper for smart matching by source type and name
 func (client *PAClient) SmartMatchStreams(sourceType configuration.PulseAudioTargetType, sourceName string) ([]Stream, *Stream) {
 	client.refreshStreams()
-	
+
 	target := &configuration.TypedTarget{
-		Type: sourceType,
-		Name: sourceName,
+		Type:       sourceType,
+		Name:       sourceName,
 		BinaryName: "", // Always empty for migration detection
 	}
-	
+
 	switch sourceType {
 	case configuration.PlaybackStream:
 		return client.smartMatchStreams(client.playbackStreams, target)
@@ -341,7 +663,7 @@ func (client *PAClient) smartMatchStreams(streams []Stream, target *configuratio
 			Str("targetName", target.Name).
 			Str("targetBinaryName", target.BinaryName).
 			Msg("Checking stream for match")
-			
+
 		if target.BinaryName != "" {
 			// Enhanced config: exact match required
 			if stream.Name == target.Name && stream.BinaryName == target.BinaryName {
@@ -365,11 +687,11 @@ func (client *PAClient) smartMatchStreams(streams []Stream, target *configuratio
 			}
 		}
 	}
-	
+
 	client.log.Debug().
 		Int("matchedCount", len(matchedStreams)).
 		Msg("smartMatchStreams result")
-	
+
 	return matchedStreams, migrationStream
 }
 
@@ -553,7 +875,7 @@ func (client *PAClient) handleStreamUpdate() {
 				Str("binaryName", stream.BinaryName).
 				Str("streamID", stream.FullName).
 				Msg("New playback stream detected")
-			
+
 			if client.newStreamCallback != nil {
 				client.newStreamCallback(stream, configuration.PlaybackStream)
 			}
@@ -568,7 +890,7 @@ func (client *PAClient) handleStreamUpdate() {
 				Str("binaryName", stream.BinaryName).
 				Str("streamID", stream.FullName).
 				Msg("New record stream detected")
-			
+
 			if client.newStreamCallback != nil {
 				client.newStreamCallback(stream, configuration.RecordStream)
 			}
@@ -581,17 +903,17 @@ func (client *PAClient) handleStreamUpdate() {
 		for _, stream := range client.playbackStreams {
 			currentPlaybackIDs[stream.FullName] = true
 		}
-		
+
 		for streamID := range client.previousPlaybackIDs {
 			if !currentPlaybackIDs[streamID] {
 				client.log.Info().
 					Str("streamID", streamID).
 					Msg("Playback stream removed")
-				
+
 				// Create a dummy stream object for the callback (we only have the ID)
 				removedStream := Stream{
-					FullName: streamID,
-					Name:     "Unknown", // We can't recover the name after removal
+					FullName:   streamID,
+					Name:       "Unknown", // We can't recover the name after removal
 					BinaryName: "Unknown",
 				}
 				client.removedStreamCallback(removedStream, configuration.PlaybackStream)
@@ -599,23 +921,23 @@ func (client *PAClient) handleStreamUpdate() {
 		}
 	}
 
-	// Check for removed record streams  
+	// Check for removed record streams
 	if client.removedStreamCallback != nil {
 		currentRecordIDs := make(map[string]bool)
 		for _, stream := range client.recordStreams {
 			currentRecordIDs[stream.FullName] = true
 		}
-		
+
 		for streamID := range client.previousRecordIDs {
 			if !currentRecordIDs[streamID] {
 				client.log.Info().
 					Str("streamID", streamID).
 					Msg("Record stream removed")
-				
+
 				// Create a dummy stream object for the callback (we only have the ID)
 				removedStream := Stream{
-					FullName: streamID,
-					Name:     "Unknown", // We can't recover the name after removal
+					FullName:   streamID,
+					Name:       "Unknown", // We can't recover the name after removal
 					BinaryName: "Unknown",
 				}
 				client.removedStreamCallback(removedStream, configuration.RecordStream)
@@ -687,34 +1009,34 @@ func (client *PAClient) StartMediaStatusMonitoring() error {
 	// Start goroutine to handle signals
 	go func() {
 		defer conn.Close()
-		
+
 		var currentPlayingStatus bool
-		
+
 		for signal := range ch {
-			if signal.Name == "org.freedesktop.DBus.Properties.PropertiesChanged" && 
-			   len(signal.Body) >= 2 {
-				
+			if signal.Name == "org.freedesktop.DBus.Properties.PropertiesChanged" &&
+				len(signal.Body) >= 2 {
+
 				// Check if this is an MPRIS player signal
 				if !strings.Contains(string(signal.Path), "/org/mpris/MediaPlayer2") {
 					continue
 				}
-				
+
 				// Parse the signal body
 				interfaceName, ok := signal.Body[0].(string)
 				if !ok || interfaceName != "org.mpris.MediaPlayer2.Player" {
 					continue
 				}
-				
+
 				properties, ok := signal.Body[1].(map[string]dbus.Variant)
 				if !ok {
 					continue
 				}
-				
+
 				// Check if PlaybackStatus changed
 				if statusVariant, exists := properties["PlaybackStatus"]; exists {
 					if status, ok := statusVariant.Value().(string); ok {
 						newPlayingStatus := (status == "Playing")
-						
+
 						// Only trigger callback if status actually changed
 						if newPlayingStatus != currentPlayingStatus {
 							currentPlayingStatus = newPlayingStatus
@@ -722,7 +1044,7 @@ func (client *PAClient) StartMediaStatusMonitoring() error {
 								Bool("isPlaying", newPlayingStatus).
 								Str("sender", string(signal.Sender)).
 								Msg("Media playback status changed")
-								
+
 							if client.mediaStatusCallback != nil {
 								client.mediaStatusCallback(newPlayingStatus)
 							}
@@ -732,7 +1054,7 @@ func (client *PAClient) StartMediaStatusMonitoring() error {
 			}
 		}
 	}()
-	
+
 	client.log.Info().Msg("MPRIS media status monitoring started")
 	return nil
 }

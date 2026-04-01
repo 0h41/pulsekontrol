@@ -90,7 +90,7 @@ func Run() {
 			// you would serialize the data and broadcast it
 			webServer.NotifyConfigUpdate(data)
 		})
-		
+
 		// Fast path for control value updates
 		configManager.Subscribe("control.value.updated", func(data interface{}) {
 			log.Debug().Interface("data", data).Msg("Received control.value.updated notification")
@@ -149,24 +149,24 @@ func Run() {
 			if hasSource {
 				// Convert 0-100 value to 0.0-1.0 range for PulseAudio
 				volumePercent := float32(initialValue) / 100.0
-				
+
 				// Create a temporary action to set the volume
 				action := configuration.Action{
 					Type: configuration.SetVolume,
 					Target: &configuration.TypedTarget{
-						Type: source.Type,
-						Name: source.Name,
+						Type:       source.Type,
+						Name:       source.Name,
 						BinaryName: source.BinaryName,
 					},
 				}
-				
+
 				// Process the volume action immediately
 				log.Info().
 					Str("sourceName", source.Name).
 					Str("sourceType", string(source.Type)).
 					Int("value", initialValue).
 					Msg("Setting initial volume for newly assigned source")
-					
+
 				paClient.ProcessVolumeAction(action, volumePercent)
 			}
 		}
@@ -177,7 +177,7 @@ func Run() {
 
 		// Update the MIDI client with the new rules
 		midiClient.UpdateRules(newRules)
-		
+
 		// Update LED indicators
 		if err := midiClient.UpdateLEDIndicators(); err != nil {
 			log.Error().Err(err).Msg("Failed to update LED indicators after source assignment")
@@ -194,14 +194,19 @@ func Run() {
 
 		// Update the MIDI client with the new rules
 		midiClient.UpdateRules(newRules)
-		
+
 		// Update LED indicators
 		if err := midiClient.UpdateLEDIndicators(); err != nil {
 			log.Error().Err(err).Msg("Failed to update LED indicators after source unassignment")
 		}
 	})
 
-	go midiClient.Run()
+	go func() {
+		if err := midiClient.Run(); err != nil {
+			log.Error().Err(err).Msg("MIDI client failed")
+			os.Exit(1)
+		}
+	}()
 
 	// Trigger initial volume actions to perform any needed config migrations
 	// and sync initial volumes to control positions
@@ -224,10 +229,10 @@ func setupSignalHandling(paClient *pulseaudio.PAClient) {
 	go func() {
 		sig := <-sigChan
 		log.Info().Msgf("Received signal %s, shutting down...", sig)
-		
+
 		// Stop stream monitoring
 		paClient.StopStreamMonitoring()
-		
+
 		os.Exit(0)
 	}()
 }
@@ -283,8 +288,8 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 				action := configuration.Action{
 					Type: configuration.SetVolume,
 					Target: &configuration.TypedTarget{
-						Type: source.Type,
-						Name: source.Name,
+						Type:       source.Type,
+						Name:       source.Name,
 						BinaryName: source.BinaryName,
 					},
 				}
@@ -332,8 +337,8 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 				action := configuration.Action{
 					Type: configuration.SetVolume,
 					Target: &configuration.TypedTarget{
-						Type: source.Type,
-						Name: source.Name,
+						Type:       source.Type,
+						Name:       source.Name,
 						BinaryName: source.BinaryName,
 					},
 				}
@@ -347,26 +352,71 @@ func createRulesFromConfig(config configuration.Config, midiDevice configuration
 		}
 	}
 
+	// Add group button rules for assigning focused window playback streams
+	for groupNumber := 1; groupNumber <= 8; groupNumber++ {
+		sliderControlID := fmt.Sprintf("slider%d", groupNumber)
+		recordRule := configuration.Rule{
+			MidiMessage: configuration.MidiMessage{
+				DeviceName:        midiDevice.Name,
+				DeviceControlPath: fmt.Sprintf("Group%d/Record", groupNumber),
+				Type:              configuration.ControlChange,
+				Channel:           15,
+				Controller:        uint8(64 + groupNumber - 1),
+			},
+			Actions: []configuration.Action{
+				{
+					Type: configuration.AssignFocusedWindowPlaybackStreams,
+					Target: &configuration.ControlTarget{
+						ControlType: "slider",
+						ControlID:   sliderControlID,
+					},
+				},
+			},
+		}
+		rules = append(rules, recordRule)
+
+		knobControlID := fmt.Sprintf("knob%d", groupNumber)
+		soloRule := configuration.Rule{
+			MidiMessage: configuration.MidiMessage{
+				DeviceName:        midiDevice.Name,
+				DeviceControlPath: fmt.Sprintf("Group%d/Solo", groupNumber),
+				Type:              configuration.ControlChange,
+				Channel:           15,
+				Controller:        uint8(32 + groupNumber - 1),
+			},
+			Actions: []configuration.Action{
+				{
+					Type: configuration.AssignFocusedWindowPlaybackStreams,
+					Target: &configuration.ControlTarget{
+						ControlType: "knob",
+						ControlID:   knobControlID,
+					},
+				},
+			},
+		}
+		rules = append(rules, soloRule)
+	}
+
 	// Add transport button rules (hardcoded for now)
 	// Play button rule - Controller 41, Channel 15 in external mode
 	playRule := configuration.Rule{
 		MidiMessage: configuration.MidiMessage{
 			DeviceName:        midiDevice.Name,
-			DeviceControlPath: "Transport/Play", 
+			DeviceControlPath: "Transport/Play",
 			Type:              configuration.ControlChange,
 			Channel:           15, // nanoKONTROL2 uses channel 0 in internal mode, channel 15 in external mode
 			Controller:        41, // Play button controller number
 		},
 		Actions: []configuration.Action{
 			{
-				Type: configuration.MediaPlayPause,
+				Type:   configuration.MediaPlayPause,
 				Target: nil, // No specific target for media control
 			},
 		},
 	}
 	rules = append(rules, playRule)
 	log.Debug().Msg("Added rule for play button (Transport/Play)")
-	
+
 	return rules
 }
 
@@ -382,32 +432,32 @@ func setupStreamMonitoring(paClient *pulseaudio.PAClient, configManager *configu
 
 		// Re-trigger the startup volume actions - this uses the exact same code path as startup
 		triggerStartupVolumeActions(paClient, configManager)
-		
+
 		// Update LED indicators to reflect current active streams
 		if err := midiClient.UpdateLEDIndicators(); err != nil {
 			log.Error().Err(err).Msg("Failed to update LED indicators after new stream detected")
 		}
 	})
-	
+
 	// Set up callback for removed streams - update LEDs when streams disappear
 	paClient.SetRemovedStreamCallback(func(stream pulseaudio.Stream, streamType configuration.PulseAudioTargetType) {
 		log.Info().
 			Str("streamID", stream.FullName).
 			Str("streamType", string(streamType)).
 			Msg("Stream removed, updating LEDs")
-		
+
 		// Update LED indicators to reflect current active streams (removed streams won't be found)
 		if err := midiClient.UpdateLEDIndicators(); err != nil {
 			log.Error().Err(err).Msg("Failed to update LED indicators after stream removed")
 		}
 	})
-	
+
 	// Set up callback for media status changes - update play button LED
 	paClient.SetMediaStatusCallback(func(isPlaying bool) {
 		log.Info().
 			Bool("isPlaying", isPlaying).
 			Msg("Media status changed, updating play button LED")
-		
+
 		// Update only the play button LED
 		if err := midiClient.UpdatePlayButtonLED(isPlaying); err != nil {
 			log.Error().Err(err).Msg("Failed to update play button LED after media status change")
@@ -420,7 +470,7 @@ func setupStreamMonitoring(paClient *pulseaudio.PAClient, configManager *configu
 		log.Error().Err(err).Msg("Failed to start stream monitoring")
 		return
 	}
-	
+
 	// Start media status monitoring
 	err = paClient.StartMediaStatusMonitoring()
 	if err != nil {
@@ -430,7 +480,6 @@ func setupStreamMonitoring(paClient *pulseaudio.PAClient, configManager *configu
 
 	log.Info().Msg("Stream monitoring enabled - new applications will automatically have volumes applied and LEDs updated")
 }
-
 
 // triggerStartupVolumeActions processes all slider/knob assignments at startup
 // This triggers migration logic and syncs volumes to control positions
@@ -447,7 +496,7 @@ func triggerStartupVolumeActions(paClient *pulseaudio.PAClient, configManager *c
 				Int("value", slider.Value).
 				Int("sources", len(slider.Sources)).
 				Msg("Processing startup slider")
-			
+
 			for _, source := range slider.Sources {
 				// Check if migration is needed before processing
 				if source.BinaryName == "" {
@@ -462,12 +511,12 @@ func triggerStartupVolumeActions(paClient *pulseaudio.PAClient, configManager *c
 						continue // Skip to next source - the migrated source will be processed in the updated config
 					}
 				}
-				
+
 				action := configuration.Action{
 					Type: configuration.SetVolume,
 					Target: &configuration.TypedTarget{
-						Type: source.Type,
-						Name: source.Name,
+						Type:       source.Type,
+						Name:       source.Name,
 						BinaryName: source.BinaryName,
 					},
 				}
@@ -476,7 +525,7 @@ func triggerStartupVolumeActions(paClient *pulseaudio.PAClient, configManager *c
 		}
 	}
 
-	// Process all knobs  
+	// Process all knobs
 	for controlID, knob := range config.Controls.Knobs {
 		if len(knob.Sources) > 0 {
 			volumePercent := float32(knob.Value) / 100.0
@@ -485,7 +534,7 @@ func triggerStartupVolumeActions(paClient *pulseaudio.PAClient, configManager *c
 				Int("value", knob.Value).
 				Int("sources", len(knob.Sources)).
 				Msg("Processing startup knob")
-				
+
 			for _, source := range knob.Sources {
 				// Check if migration is needed before processing
 				if source.BinaryName == "" {
@@ -500,12 +549,12 @@ func triggerStartupVolumeActions(paClient *pulseaudio.PAClient, configManager *c
 						continue // Skip to next source - the migrated source will be processed in the updated config
 					}
 				}
-				
+
 				action := configuration.Action{
 					Type: configuration.SetVolume,
 					Target: &configuration.TypedTarget{
-						Type: source.Type,
-						Name: source.Name,
+						Type:       source.Type,
+						Name:       source.Name,
 						BinaryName: source.BinaryName,
 					},
 				}
