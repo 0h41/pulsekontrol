@@ -1,6 +1,10 @@
 package configuration
 
-import "gopkg.in/yaml.v3"
+import (
+	"slices"
+
+	"gopkg.in/yaml.v3"
+)
 
 // Legacy types - keep for compatibility during transition
 type MidiDeviceType string
@@ -113,19 +117,18 @@ type ControlTarget struct {
 	ControlID   string
 }
 
-// SliderConfig represents a slider on the MIDI controller
-type SliderConfig struct {
+// ControlConfig represents a slider or knob on the MIDI controller
+type ControlConfig struct {
 	Path    string   `yaml:"path"`    // The MIDI control path (e.g., "Group1/Slider")
 	Value   int      `yaml:"value"`   // Current value (0-100)
-	Sources []Source `yaml:"sources"` // Audio sources controlled by this slider
+	Sources []Source `yaml:"sources"` // Audio sources controlled by this control
 }
 
+// SliderConfig represents a slider on the MIDI controller
+type SliderConfig = ControlConfig
+
 // KnobConfig represents a knob on the MIDI controller
-type KnobConfig struct {
-	Path    string   `yaml:"path"`    // The MIDI control path (e.g., "Group1/Knob")
-	Value   int      `yaml:"value"`   // Current value (0-100)
-	Sources []Source `yaml:"sources"` // Audio sources controlled by this knob
-}
+type KnobConfig = ControlConfig
 
 // DeviceConfig contains MIDI device settings
 type DeviceConfig struct {
@@ -144,4 +147,24 @@ type Controls struct {
 type Config struct {
 	Device   DeviceConfig `yaml:"device"`   // MIDI device settings
 	Controls Controls     `yaml:"controls"` // Controller mappings
+}
+
+// Clone returns a deep copy of the configuration
+func (c Config) Clone() Config {
+	clone := c
+	clone.Controls.Sliders = cloneControls(c.Controls.Sliders)
+	clone.Controls.Knobs = cloneControls(c.Controls.Knobs)
+	return clone
+}
+
+func cloneControls(controls map[string]ControlConfig) map[string]ControlConfig {
+	if controls == nil {
+		return nil
+	}
+	clone := make(map[string]ControlConfig, len(controls))
+	for id, control := range controls {
+		control.Sources = slices.Clone(control.Sources)
+		clone[id] = control
+	}
+	return clone
 }

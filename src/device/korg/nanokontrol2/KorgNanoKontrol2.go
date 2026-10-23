@@ -2,6 +2,7 @@ package korgNanokontrol2
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -400,7 +401,7 @@ func (d *KorgNanoKontrol2) EnableExternalLEDMode(out drivers.Out) error {
 		return fmt.Errorf("failed to send LED enable SysEx: %w", err)
 	}
 
-	d.log.Info().Msg("External LED mode enabled")
+	d.log.Debug().Msg("External LED mode enabled")
 	return nil
 }
 
@@ -467,86 +468,47 @@ func (d *KorgNanoKontrol2) SetButtonLED(out drivers.Out, controller uint8, state
 	return send(midiData)
 }
 
-// UpdateSourceIndicatorLEDs updates S/R button LEDs based on currently active streams
-func (d *KorgNanoKontrol2) UpdateSourceIndicatorLEDs(out drivers.Out, config configuration.Config, paClient *pulseaudio.PAClient) error {
+// UpdateSourceIndicatorLEDs updates S/R button LEDs based on currently active streams.
+// A Record (slider) or Solo (knob) LED is lit if any source assigned to that control
+// has an active stream among the given audio sources.
+func (d *KorgNanoKontrol2) UpdateSourceIndicatorLEDs(out drivers.Out, config configuration.Config, sources []pulseaudio.AudioSource) error {
 	// Enable external LED mode first (in case device was power cycled)
 	if err := d.EnableExternalLEDMode(out); err != nil {
 		d.log.Warn().Err(err).Msg("Failed to enable external LED mode")
 		return err
 	}
-	
-	// Check each group (1-8) for active streams
+
+	var errs []error
 	for groupNum := 1; groupNum <= 8; groupNum++ {
-		// Check slider (Record button LED) - light up if ANY assigned source has an active stream
-		sliderId := fmt.Sprintf("slider%d", groupNum)
+		slider := config.Controls.Sliders[fmt.Sprintf("slider%d", groupNum)]
 		recordController := uint8(64 + groupNum - 1) // R buttons: 64-71
-		hasActiveStream := false
-		
-		if slider, exists := config.Controls.Sliders[sliderId]; exists {
-			for _, source := range slider.Sources {
-				if d.hasMatchingActiveStream(paClient, source) {
-					hasActiveStream = true
-					d.log.Debug().Msgf("Group %d slider has ACTIVE stream for source %s - turning ON Record LED", 
-						groupNum, source.Name)
-					break
-				}
-			}
+		if err := d.SetButtonLED(out, recordController, hasActiveStream(slider.Sources, sources)); err != nil {
+			errs = append(errs, err)
 		}
-		d.SetButtonLED(out, recordController, hasActiveStream)
-		
-		// Check knob (Solo button LED) - light up if ANY assigned source has an active stream
-		knobId := fmt.Sprintf("knob%d", groupNum)
+
+		knob := config.Controls.Knobs[fmt.Sprintf("knob%d", groupNum)]
 		soloController := uint8(32 + groupNum - 1) // S buttons: 32-39
-		hasActiveStream = false
-		
-		if knob, exists := config.Controls.Knobs[knobId]; exists {
-			for _, source := range knob.Sources {
-				if d.hasMatchingActiveStream(paClient, source) {
-					hasActiveStream = true
-					d.log.Debug().Msgf("Group %d knob has ACTIVE stream for source %s - turning ON Solo LED", 
-						groupNum, source.Name)
-					break
-				}
-			}
+		if err := d.SetButtonLED(out, soloController, hasActiveStream(knob.Sources, sources)); err != nil {
+			errs = append(errs, err)
 		}
-		d.SetButtonLED(out, soloController, hasActiveStream)
 	}
-	
-	return nil
+
+	return errors.Join(errs...)
 }
 
-// hasMatchingActiveStream checks if there's an active stream that matches the given source configuration
-// Uses the same logic as the web UI: exact BinaryName match when specified, legacy name match otherwise
-// LEDs only turn on for streams (PlaybackStream/RecordStream), not devices (OutputDevice/InputDevice)
-func (d *KorgNanoKontrol2) hasMatchingActiveStream(paClient *pulseaudio.PAClient, source configuration.Source) bool {
-	// Don't turn on LEDs for devices, only for streams
-	sourceTypeLower := strings.ToLower(string(source.Type))
-	if sourceTypeLower == "outputdevice" || sourceTypeLower == "inputdevice" {
-		return false
-	}
-	
-	// Get current audio sources
-	sources := paClient.GetAudioSources()
-	
-	// Use the same matching logic as the web UI server
-	for _, audioSource := range sources {
-		// Use lowercase comparison for source types
-		audioSourceTypeLower := strings.ToLower(audioSource.Type)
-		
-		// For enhanced configs (with BinaryName), require exact match
-		// For legacy configs (without BinaryName), match any stream with same name/type
-		if audioSourceTypeLower == sourceTypeLower && audioSource.Name == source.Name {
-			if source.BinaryName != "" {
-				// Enhanced config: require exact BinaryName match
-				if audioSource.BinaryName == source.BinaryName {
-					return true
-				}
-			} else {
-				// Legacy config: any matching name/type
+// hasActiveStream reports whether any of the configured sources has an active stream.
+// LEDs only turn on for streams (PlaybackStream/RecordStream), not devices (OutputDevice/InputDevice).
+func hasActiveStream(configured []configuration.Source, active []pulseaudio.AudioSource) bool {
+	for _, source := range configured {
+		if strings.EqualFold(string(source.Type), string(configuration.OutputDevice)) ||
+			strings.EqualFold(string(source.Type), string(configuration.InputDevice)) {
+			continue
+		}
+		for _, audioSource := range active {
+			if audioSource.Matches(source) {
 				return true
 			}
 		}
 	}
-	
 	return false
 }
